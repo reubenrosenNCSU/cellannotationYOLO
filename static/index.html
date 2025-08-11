@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Advanced Image Annotation Tool v2</title>
+    <title>Advanced Image Annotation Tool</title>
     <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/tiff.js@1.0.0/tiff.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
@@ -236,7 +236,7 @@ input[type="number"]::-webkit-outer-spin-button {
 </head>
 <body>
     <div class="toolbar">
-        <h3>Annotation and Detection Tool v2</h3>
+        <h3>Annotation and Detection Tool</h3>
         <div id="current-image-display" style="margin: 5px 0; font-size: 0.9em; color: #667;"></div>
         
         <input type="file" id="image-input" accept=".tiff,.tif">
@@ -435,7 +435,7 @@ const colorToggleBtn = document.getElementById('color-toggle-btn');
                 imageName: 'image.tiff',
                 naturalSize: { width: 0, height: 0 }
             };
-            var overlap_factor = 0.1;
+            var overlap_factor = 0.3;
             // DOM Elements
             const canvas = document.getElementById('canvas');
             const ctx = canvas.getContext('2d');
@@ -818,13 +818,16 @@ document.getElementById('start-batch').addEventListener('click', async () => {
             try {
                 const modelType = document.getElementById('custom-model-type').value;
                 const modelFile = document.getElementById('custom-model-file').files[0];
-                const threshold = document.getElementById('custom-threshold').value;
                 
+                if (!modelFile) {
+                    alert('Please select a .h5 model file!');
+                    return;
+                }
+
                 const formData = new FormData();
                 formData.append('model_type', modelType);
-                formData.append('pt_file', modelFile);  // Changed from h5_file
-                formData.append('threshold', threshold);  // Add threshold
-                
+                formData.append('h5_file', modelFile);
+
                 const response = await axios.post('/detect-custom', formData, {
                     headers: {'Content-Type': 'multipart/form-data'},
                     withCredentials: true
@@ -1011,54 +1014,62 @@ document.getElementById('start-batch').addEventListener('click', async () => {
 
             document.getElementById('detect-madm-btn').addEventListener('click', detectMADM);
 
-async function detectMADM() {
+            async function detectMADM() {
+    // Get threshold from input
     const threshold = parseFloat(document.getElementById('detection-threshold').value);
     
     try {
-        const response = await axios.post('/detect-madm', { threshold }, {
-            withCredentials: true
+        // Send threshold in request
+        const response = await axios.post('/detect-madm', { 
+            threshold: threshold 
+        }, {
+            withCredentials: true 
         });
-
-        const yoloTxt = response.data.annotations;
-        const imgWidth = response.data.image_width;
-        const imgHeight = response.data.image_height;
-
-        state.annotations = [];
+        const csvData = response.data.annotations;
+        
+        let rawAnnotations = [];
         let importedCount = 0;
 
-        yoloTxt.split('\n').forEach(line => {
-            if (!line.trim()) return;
-            const [clsStr, cxStr, cyStr, wStr, hStr] = line.trim().split(' ');
-            const cls = parseInt(clsStr);
-            const cx = parseFloat(cxStr) * imgWidth;
-            const cy = parseFloat(cyStr) * imgHeight;
-            const w = parseFloat(wStr) * imgWidth;
-            const h = parseFloat(hStr) * imgHeight;
-            const x1 = cx - w / 2;
-            const y1 = cy - h / 2;
+        // Add this line to split CSV data into lines
+        const lines = csvData.split('\n');
 
-            state.annotations.push({
+        lines.forEach(line => {
+            if (!line.trim()) return;
+            const [filename, x1Str, y1Str, x2Str, y2Str, className] = line.split(',');
+            
+            let x1 = parseFloat(x1Str);
+            let y1 = parseFloat(y1Str);
+            let x2 = parseFloat(x2Str);
+            let y2 = parseFloat(y2Str);
+            [x1, y1, x2, y2] = sanitizeBox(x1, y1, x2, y2);
+
+            const classIndex = CLASS_NAMES.indexOf(className);
+            if (classIndex === -1) return;
+            
+            rawAnnotations.push({
                 x: x1,
                 y: y1,
-                width: w,
-                height: h,
-                class: cls,
+                width: x2 - x1,
+                height: y2 - y1,
+                class: classIndex,
                 isDetected: true
             });
             importedCount++;
         });
 
-        state.annotations = mergeOverlappingBoxes(state.annotations, overlap_factor, true);
-        updateCellCounts(state.annotations.length);
+        // Apply merging to MADM results
+        state.annotations = mergeOverlappingBoxes(rawAnnotations, overlap_factor, true);
+        const finalCount = state.annotations.length;
+        updateCellCounts(finalCount);
         updateDetectedDiameter();
         redraw();
-        alert(`Detected ${importedCount} MADM objects!`);
+        alert(`Detected ${importedCount} objects, merged to ${state.annotations.length} after processing!`);
 
     } catch (error) {
-        alert('Detection failed: ' + (error.response?.data?.error || error.message));
+        alert('Detection failed: ' + 
+            (error.response?.data?.error || error.message));
     }
 }
-
 
 
             document.getElementById('clear-training-data-btn').addEventListener('click', clearTrainingData);
@@ -1120,55 +1131,58 @@ async function detectMADM() {
 
             document.getElementById('detect-sgn-btn').addEventListener('click', detectSGN);
 
-async function detectSGN() {
-    const threshold = parseFloat(document.getElementById('detection-threshold').value);
-    if (isNaN(threshold) || threshold < 0 || threshold > 1) {
-        alert('Please enter a valid threshold between 0 and 1!');
-        return;
-    }
-
+            async function detectSGN() {
+                const threshold = parseFloat(document.getElementById('detection-threshold').value);
+                if (isNaN(threshold) || threshold < 0 || threshold > 1) {
+                    alert('Please enter a valid threshold between 0 and 1!');
+                    return;
+                }
     try {
         const response = await axios.post('/detect-sgn', { threshold }, {
-            withCredentials: true
+            withCredentials: true 
         });
-
-        const yoloTxt = response.data.annotations;
-        const imgWidth = response.data.image_width;
-        const imgHeight = response.data.image_height;
-
-        state.annotations = [];
+        const csvData = response.data.annotations;
+        
+        // Parse and import the annotations
+        const lines = csvData.split('\n');
+        let rawAnnotations = [];
         let importedCount = 0;
 
-        yoloTxt.split('\n').forEach(line => {
+        lines.forEach(line => {
             if (!line.trim()) return;
-            const [clsStr, cxStr, cyStr, wStr, hStr] = line.trim().split(' ');
-            const cls = parseInt(clsStr);
-            const cx = parseFloat(cxStr) * imgWidth;
-            const cy = parseFloat(cyStr) * imgHeight;
-            const w = parseFloat(wStr) * imgWidth;
-            const h = parseFloat(hStr) * imgHeight;
-            const x1 = cx - w / 2;
-            const y1 = cy - h / 2;
+            const [filename, x1Str, y1Str, x2Str, y2Str, className] = line.split(',');
+            
+            let x1 = parseFloat(x1Str);
+            let y1 = parseFloat(y1Str);
+            let x2 = parseFloat(x2Str);
+            let y2 = parseFloat(y2Str);
+            [x1, y1, x2, y2] = sanitizeBox(x1, y1, x2, y2);
 
-            state.annotations.push({
+            const classIndex = CLASS_NAMES.indexOf(className);
+            if (classIndex === -1) return;
+            
+            rawAnnotations.push({
                 x: x1,
                 y: y1,
-                width: w,
-                height: h,
-                class: cls,
+                width: x2 - x1,
+                height: y2 - y1,
+                class: classIndex,
                 isDetected: true
             });
             importedCount++;
         });
 
-        state.annotations = mergeOverlappingBoxes(state.annotations, overlap_factor, true);
-        updateCellCounts(state.annotations.length);
+        // Merge overlapping boxes before updating state
+        state.annotations = mergeOverlappingBoxes(rawAnnotations, overlap_factor, false);
+        const finalCount = state.annotations.length;
+        updateCellCounts(finalCount);
         updateDetectedDiameter();
         redraw();
-        alert(`Detected ${importedCount} SGN objects!`);
+        alert(`Detected ${importedCount} objects, merged to ${state.annotations.length} after processing!`);
 
     } catch (error) {
-        alert('Detection failed: ' + (error.response?.data?.error || error.message));
+        alert('Detection failed: ' + 
+            (error.response?.data?.error || error.message));
     }
 }
 
@@ -1306,59 +1320,76 @@ async function handleImageUpload(e) {
             // updateContrastRange();
             }
 
-function redraw() {
-  // 1) CLEAR & RESET
-  ctx.setTransform(1,0,0,1,0,0);
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
+            function redraw() {
+            ctx.save();
+            ctx.setTransform(1, 0, 0, 1, 0, 0);
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            // Apply transformations and filters
+            let brightVal = parseInt(brightness.value);
+            let contVal = parseInt(contrast.value);
+            
+            ctx.filter = `brightness(${100 + brightVal}%) 
+                        contrast(${100 + contVal}%)`;
+            ctx.setTransform(state.scale, 0, 0, state.scale, state.offsetX, state.offsetY);
+            
+            // Draw image
+            ctx.drawImage(state.image, 0, 0, state.naturalSize.width, state.naturalSize.height);
+            
+            // Draw annotations
+            state.annotations.forEach(ann => {
+                // Fill with semi-transparent color
+                ctx.fillStyle = hexToRGBA(getClassColor(ann.class), 0.1); // 20% opacity
+                ctx.fillRect(ann.x, ann.y, ann.width, ann.height);
+                
+                // Stroke the border
+                ctx.strokeStyle = getClassColor(ann.class);
+                ctx.lineWidth = 2 / state.scale;
+                if (ann.isDetected) {
+                    ctx.setLineDash([5 / state.scale, 5 / state.scale]);
+                } else {
+                    ctx.setLineDash([]);
+                }
+                ctx.strokeRect(ann.x, ann.y, ann.width, ann.height);
+            });
 
-  // 2) DRAW FILTERED IMAGE (isolated)
-  ctx.save();
-    ctx.setTransform(state.scale, 0, 0, state.scale, state.offsetX, state.offsetY);
-    ctx.filter = `brightness(${100 + +brightness.value}%) contrast(${100 + +contrast.value}%)`;
-    ctx.drawImage(state.image, 0, 0, state.naturalSize.width, state.naturalSize.height);
-  ctx.restore();
-
-  // 3) DRAW ANNOTATIONS + LIVE PREVIEW (no filter)
-  ctx.save();
-    ctx.setTransform(state.scale, 0, 0, state.scale, state.offsetX, state.offsetY);
-    ctx.filter = 'none';
-
-    // 3a) Stored boxes (true colors)
-    state.annotations.forEach(ann => {
-      ctx.fillStyle   = hexToRGBA(getClassColor(ann.class), 0.1);
-      ctx.strokeStyle = getClassColor(ann.class);
-      ctx.lineWidth   = 2 / state.scale;
-      ctx.setLineDash(ann.isDetected
-        ? [5/ state.scale, 5/ state.scale]
-        : []);
-      ctx.fillRect(ann.x, ann.y, ann.width, ann.height);
-      ctx.strokeRect(ann.x, ann.y, ann.width, ann.height);
-    });
-
-    // 3b) Your live “rubber-band” preview
-    if (state.isDrawing || (state.isCropping && state.isCropStarted)) {
-      // Convert last mouse to image coords
-      const pt = getTransformedPoint(lastX, lastY);
-      const x  = Math.min(startX, pt.x);
-      const y  = Math.min(startY, pt.y);
-      const w  = Math.abs(pt.x - startX);
-      const h  = Math.abs(pt.y - startY);
-
-      // Use your original styling
-      if (state.isCropping) {
-        ctx.strokeStyle = 'blue';
-        ctx.fillStyle   = 'rgba(0,0,255,0.1)';
-      } else {
-        ctx.strokeStyle = getClassColor(state.currentClass);
-        ctx.fillStyle   = hexToRGBA(getClassColor(state.currentClass), 0.3);
-      }
-      ctx.setLineDash([5/ state.scale]);
-
-      ctx.fillRect(x, y, w, h);
-      ctx.strokeRect(x, y, w, h);
-    }
-  ctx.restore();
-}
+            // Draw temporary shapes only if action has started
+            if ((state.isDrawing || (state.isCropping && state.isCropStarted))) {
+                const current = getTransformedPoint(lastX, lastY);
+                
+                // Use getClassColor() for both stroke and fill
+                ctx.strokeStyle = state.isCropping ? 'blue' : getClassColor(state.currentClass);
+                
+                // Set fill style based on context
+                if (state.isCropping) {
+                    ctx.fillStyle = 'rgba(0, 0, 255, 0.1)';
+                } else {
+                    ctx.fillStyle = hexToRGBA(getClassColor(state.currentClass), 0.3);
+                }
+                
+                // Save and restore context to prevent style bleeding
+                ctx.save();
+                
+                // Draw fill
+                ctx.fillRect(
+                    Math.min(startX, current.x),
+                    Math.min(startY, current.y),
+                    Math.abs(current.x - startX),
+                    Math.abs(current.y - startY)
+                );
+                
+                // Draw stroke
+                ctx.setLineDash([5 / state.scale]);
+                ctx.strokeRect(
+                    Math.min(startX, current.x),
+                    Math.min(startY, current.y),
+                    Math.abs(current.x - startX),
+                    Math.abs(current.y - startY)
+                );
+                
+                ctx.restore();
+            }
+            }
 
             // Coordinate Transformation
             function getTransformedPoint(x, y) {
@@ -1465,22 +1496,23 @@ function redraw() {
             // Annotation Operations
             function exportAnnotations() {
     const filename = `${state.imageName}.${state.originalExtension}`;
-    const imageWidth = state.naturalSize.width;
-    const imageHeight = state.naturalSize.height;
-    const yoloData = state.annotations.map(ann => {
-        // Convert to normalized center coordinates
-        const centerX = (ann.x + ann.width / 2) / imageWidth;
-        const centerY = (ann.y + ann.height / 2) / imageHeight;
-        const width = ann.width / imageWidth;
-        const height = ann.height / imageHeight;
-        
-        return `${ann.class} ${centerX.toFixed(6)} ${centerY.toFixed(6)} ${width.toFixed(6)} ${height.toFixed(6)}`;
-    }).join('\n');
-
+    const csv = [
+        // CSV header
+        'filename,x1,y1,x2,y2,class_name',
+        // Annotation data
+        ...state.annotations.map(ann => {
+            let x1 = Math.round(ann.x);
+            let y1 = Math.round(ann.y);
+            let x2 = Math.round(ann.x + ann.width);
+            let y2 = Math.round(ann.y + ann.height);
+            [x1, y1, x2, y2] = sanitizeBox(x1, y1, x2, y2);
+            return `${filename},${x1},${y1},${x2},${y2},${CLASS_NAMES[ann.class]}`;
+        })
+    ].join('\n');
 
     // Send data to backend to create ZIP
     axios.post('/export-annotations', {
-        yolo_data: yoloData,  // Changed from csv_data
+        csv_data: csv,
         original_filename: filename,
         withCredentials: true 
     }, {
@@ -1506,64 +1538,55 @@ function redraw() {
         alert(`Export failed: ${error.response?.data?.error || error.message}`);
     });
 }
-function importAnnotations() {
-    if (!state.image || state.naturalSize.width === 0 || state.naturalSize.height === 0) {
-        alert('Please load an image first!');
-        return;
-    }
+            function importAnnotations() {
+            const input = document.createElement('input');
+            input.type = 'file';
+            input.accept = '.csv';
+            
+            input.onchange = e => {
+                const file = e.target.files[0];
+                const reader = new FileReader();
+                
+                reader.onload = e => {
+                    const lines = e.target.result.split('\n');
+                    state.annotations = [];
+                    let actualImported = 0;
 
-    const input = document.createElement('input');
-    input.type = 'file';
-    input.accept = '.txt';
-    
-    input.onchange = e => {
-        const file = e.target.files[0];
-        const reader = new FileReader();
-        
-        reader.onload = e => {
-            const yoloData = e.target.result;
-            const lines = yoloData.split('\n');
-            state.annotations = [];
-            let actualImported = 0;
-            const imageWidth = state.naturalSize.width;
-            const imageHeight = state.naturalSize.height;
+                    lines.forEach(line => {
+                        if (!line.trim()) return;
+                        const [filename, x1Str, y1Str, x2Str, y2Str, className] = line.split(',');
+                        
+                        // NEW: Convert and sanitize
+                        let x1 = parseFloat(x1Str);
+                        let y1 = parseFloat(y1Str);
+                        let x2 = parseFloat(x2Str);
+                        let y2 = parseFloat(y2Str);
+                        [x1, y1, x2, y2] = sanitizeBox(x1, y1, x2, y2);
 
-            lines.forEach(line => {
-                if (!line.trim()) return;
-                const parts = line.trim().split(/\s+/);
-                
-                // Handle both formats: with and without confidence score
-                if (parts.length !== 5 && parts.length !== 6) return;
-                
-                const classId = parseInt(parts[0]);
-                const centerX = parseFloat(parts[1]) * imageWidth;
-                const centerY = parseFloat(parts[2]) * imageHeight;
-                const width = parseFloat(parts[3]) * imageWidth;
-                const height = parseFloat(parts[4]) * imageHeight;
-                
-                // Convert to top-left coordinates
-                const x = centerX - width / 2;
-                const y = centerY - height / 2;
-                
-                state.annotations.push({
-                    x: x,
-                    y: y,
-                    width: width,
-                    height: height,
-                    class: classId,
-                    isDetected: true
-                });
-                actualImported++;
-            });
+                        const classIndex = CLASS_NAMES.indexOf(className);
+                        if (classIndex === -1) return;
 
-            updateCellCounts(actualImported);
-            redraw();
-            alert(`Imported ${actualImported} annotations!`);
-        };
-        reader.readAsText(file);
-    };
-    input.click();
-}
+                        state.annotations.push({
+                            x: x1,
+                            y: y1,
+                            width: x2 - x1,
+                            height: y2 - y1,
+                            class: classIndex,
+                            isDetected: true
+                        });
+                        actualImported++;
+                    });
+
+                    updateCellCounts(actualImported);
+                    redraw();
+                };
+                reader.readAsText(file);
+            };
+            input.click();
+        }
+
+
+
 
     function saveImage() {
     const tempCanvas = document.createElement('canvas');
@@ -1616,64 +1639,65 @@ function hexToRGBA(hex, alpha) {
     return `rgba(${r}, ${g}, ${b}, ${alpha})`;
 }
 
-async function persistCropOnServer(origX, origY, origW, origH) {
-  const fd = new FormData();
-  fd.append('original_filename', `${state.imageName}.${state.originalExtension}`);
-  fd.append('x', origX);
-  fd.append('y', origY);
-  fd.append('width', origW);
-  fd.append('height', origH);
-  await axios.post('/upload-cropped', fd, { withCredentials: true });
-}
 
-// Image Operations
-  async function cropImage(x, y, width, height) {
-    // 1) Make sure we’re using the un‑transformed source image
-    const src = state.image;
-    if (!src) return alert('Load an image first!');
-
-    // 2) Create a temporary canvas the size of the selection
-    const tmp = document.createElement('canvas');
-    tmp.width  = width;
-    tmp.height = height;
-    const tctx = tmp.getContext('2d');
-
-    const origX      = Math.round(x);
-    const origY      = Math.round(y);
-    const origWidth  = Math.round(width);
+            // Image Operations
+    async function cropImage(x, y, width, height) {
+    const origX = Math.round(x);
+    const origY = Math.round(y);
+    const origWidth = Math.round(width);
     const origHeight = Math.round(height);
 
-    // 2) Tell the server to crop its TIFF to exactly that box
-    await persistCropOnServer(origX, origY, origWidth, origHeight);
+    // Validate coordinates
+    if (origWidth <= 0 || origHeight <= 0 || 
+        origX < 0 || origY < 0 || 
+        origX + origWidth > state.naturalSize.width || 
+        origY + origHeight > state.naturalSize.height) {
+        alert('Invalid crop area!');
+        return;
+    }
 
-    // 3) Draw exactly the rectangle you dragged from the SOURCE image
-    //    (src is state.image, which is at full natural size)
-    tctx.drawImage(
-      src,
-      x, y, width, height,  // from src-image coords
-      0, 0, width, height   // onto tmp at (0,0)
+    try {
+        const formData = new FormData();
+        formData.append('original_filename', `${state.imageName}.${state.originalExtension}`);
+        formData.append('x', origX);
+        formData.append('y', origY);
+        formData.append('width', origWidth);
+        formData.append('height', origHeight);
 
-      
-    );
+        const response = await axios.post('/upload-cropped', formData, {
+            withCredentials: true 
+        });
+        
+        // Update image display
+        const img = new Image();
+        img.onload = () => {
+            state.image = img;
+            state.naturalSize = { width: img.width, height: img.height };
+            canvas.width = img.width;
+            canvas.height = img.height;
+            
+            // Adjust annotations to new dimensions
+            state.annotations = state.annotations
+                .filter(ann => 
+                    ann.x >= origX && ann.x + ann.width <= origX + origWidth &&
+                    ann.y >= origY && ann.y + ann.height <= origY + origHeight
+                )
+                .map(ann => ({
+                    ...ann,
+                    x: ann.x - origX,
+                    y: ann.y - origY
+                }));
+            
+            resetView();
+            redraw();
+        };
+        img.src = response.data.converted_url;
 
-    // 4) Now replace your onscreen canvas with that cropped result
-    canvas.width  = width;
-    canvas.height = height;
-    // reset any zoom/pan
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.clearRect(0, 0, width, height);
-    ctx.drawImage(tmp, 0, 0);
-
-    // 5) Update state.image to the cropped image so the rest of your code still works
-    state.image = new Image();
-    state.image.onload = () => {
-      state.naturalSize = { width, height };
-      state.offsetX = state.offsetY = 0;
-      state.scale    = 1;
-      redraw();  // redraw annotations/etc if needed
-    };
-    state.image.src = tmp.toDataURL();
-  }
+    } catch (error) {
+        console.error('Crop error:', error);
+        alert('Failed to crop image: ' + (error.response?.data?.error || error.message));
+    }
+}
 
             // UI Toggles
             function toggleCropping() {
@@ -1800,15 +1824,10 @@ document.getElementById('fine-tune-btn').addEventListener('click', () => {
     
     <div style="margin-bottom: 15px;">
         <label class="btn" style="display: block; background: #4CAF50; color: white;">
-            Upload Model (.pt)
-            <input type="file" id="custom-model-file" accept=".pt" hidden>
+            Upload Model (.h5)
+            <input type="file" id="custom-model-file" accept=".h5" hidden>
         </label>
         <div id="selected-model-name" style="margin-top: 5px; font-size: 0.9em;"></div>
-    </div>
-        <div style="margin-bottom: 15px;">
-        <label for="custom-threshold">Threshold (0-1):</label>
-        <input type="number" id="custom-threshold" value="0.5" step="0.1" min="0" max="1" 
-               class="btn" style="width: 100%;">
     </div>
     
     <div style="display: flex; gap: 10px;">
