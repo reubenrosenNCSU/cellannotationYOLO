@@ -25,6 +25,79 @@ from ultralytics import YOLO
 from scripts.normalization import normalize_image
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))  # Gets directory where app.py is
 
+def detect_with_tiling(user_id, model_path, threshold=0.5):
+    """Tiling detection with normalization matching SGN/CD3 pipeline"""
+    try:
+        # Find uploaded image
+        upload_dir = os.path.join('users', user_id, 'uploads')
+        image_files = [f for f in os.listdir(upload_dir) 
+                     if f.lower().endswith(('.tif', '.tiff', '.png', '.jpg', '.jpeg'))]
+        if not image_files:
+            return None, None, None, "No image found in uploads"
+        
+        image_path = os.path.join(upload_dir, image_files[0])
+        
+        # Create normalized version of FULL IMAGE
+        normalized_path = os.path.join(upload_dir, 'normalized_temp.png')
+        normalize_image(image_path, normalized_path)
+        
+        # Set up directories
+        tiles_dir = os.path.join('users', user_id, 'images', 'tiles')
+        output_txt_dir = os.path.join('users', user_id, 'images', 'tiles_output')
+        merged_output_path = os.path.join('users', user_id, 'finaloutput', 'merged_detections.txt')
+        
+        os.makedirs(tiles_dir, exist_ok=True)
+        os.makedirs(output_txt_dir, exist_ok=True)
+        os.makedirs(os.path.dirname(merged_output_path), exist_ok=True)
+        
+        # Get original image dimensions
+        with Image.open(image_path) as img:
+            orig_width, orig_height = img.size
+        
+        # Split into tiles - using the same script as SGN/CD3
+        subprocess.run([
+            'python3', 'scripts/split_image.py',
+            '--image', normalized_path,
+            '--output', tiles_dir
+        ], check=True)
+        
+        # Detect all tiles using GPU-efficient function
+        detect_tiles_in_batch(tiles_dir, output_txt_dir, model_path, threshold)
+        
+        # Merge annotations - using the same script as SGN/CD3
+        subprocess.run([
+            'python3', 'scripts/merge_annotations.py',
+            '--tiles', output_txt_dir,
+            '--output', merged_output_path,
+            '--image_width', str(orig_width),
+            '--image_height', str(orig_height)
+        ], check=True)
+        
+        # Read results
+        with open(merged_output_path, 'r') as f:
+            annotations = f.read()
+        
+        # Cleanup temporary files
+        try:
+            os.remove(normalized_path)
+            shutil.rmtree(tiles_dir)
+            shutil.rmtree(output_txt_dir)
+        except:
+            pass
+        
+        return annotations, orig_width, orig_height, None
+        
+    except Exception as e:
+        # Cleanup on error
+        try:
+            os.remove(normalized_path)
+            shutil.rmtree(tiles_dir, ignore_errors=True)
+            shutil.rmtree(output_txt_dir, ignore_errors=True)
+        except:
+            pass
+        return None, None, None, str(e)
+
+
 def sanitize_box(x1, y1, x2, y2):
     """Ensure x1 <= x2 and y1 <= y2"""
     new_x1 = min(x1, x2)
@@ -836,80 +909,27 @@ def detect_custom():
     user_id = session['user_id']
     try:
         pt_file = request.files['pt_file']
-        model_type = request.form.get('model_type', 'SGN')
-        threshold = float(request.form.get('threshold', 0.5))
-        
-        upload_dir = os.path.join('users', user_id, 'uploads')
-        converted_dir = os.path.join('users', user_id, 'converted')
-        
-        # Save model temporarily
-        model_path = os.path.join(upload_dir, secure_filename(pt_file.filename))
+        model_path = os.path.join('users', user_id, 'uploads', secure_filename(pt_file.filename))
         pt_file.save(model_path)
-
-        # Find uploaded image
-        image_files = [f for f in os.listdir(upload_dir) 
-                      if f.lower().endswith(('.png', '.jpg', '.jpeg', '.tiff', '.tif'))]
-        if not image_files:
-            return jsonify({'error': 'No image found'}), 400
-            
-        image_name = image_files[0]
-        image_path = os.path.join(upload_dir, image_name)
-
-        # Create normalized version
-        temp_normalized_path = os.path.join(converted_dir, 'temp_normalized.png')
-        normalize_image(image_path, temp_normalized_path)
-
-        # Load model and predict
-        model = YOLO(model_path)
-        results = model.predict(
-            source=temp_normalized_path,
-            conf=threshold,
-            save=False,
-            save_txt=False,
-            save_conf=True
-        )
-
-        # Clean up temp file
-        try:
-            os.remove(temp_normalized_path)
-        except:
-            pass
-
-        # Get original image dimensions
-        with Image.open(image_path) as img:
-            orig_width, orig_height = img.size
-
-        # Process results to YOLO format
-        yolo_lines = []
-        for result in results:
-            for box in result.boxes:
-                x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
-                conf = box.conf.item()
-                cls = int(box.cls.item())
-                
-                # Convert to normalized center coordinates
-                center_x = (x1 + x2) / 2.0 / orig_width
-                center_y = (y1 + y2) / 2.0 / orig_height
-                width = (x2 - x1) / orig_width
-                height = (y2 - y1) / orig_height
-
-                line = f"{cls} {center_x:.6f} {center_y:.6f} {width:.6f} {height:.6f}"
-                yolo_lines.append(line)
-
-        return jsonify({
-            "annotations": "\n".join(yolo_lines),
-            "image_width": orig_width,
-            "image_height": orig_height
-        })
-
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-    finally:
-        # Cleanup model file
+        
+        annotations, img_width, img_height, error = detect_with_tiling(user_id, model_path)
+        
         try:
             os.remove(model_path)
         except:
             pass
+            
+        if error:
+            return jsonify({'error': error}), 500
+
+        return jsonify({
+            "annotations": annotations,
+            "image_width": img_width,
+            "image_height": img_height
+        })
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/scale-image', methods=['POST'])
 def scale_image():
@@ -960,69 +980,18 @@ def detect_finetuned():
     user_id = session['user_id']
     try:
         model_type = request.json.get('model_type', 'SGN')
-        threshold = float(request.json.get('threshold', 0.5))
-        
-        user_snapshot_dir = os.path.join('users', user_id, 'snapshots')
-        model_path = os.path.join(user_snapshot_dir, f'{model_type}_finetuned.pt')
-        
+        model_path = os.path.join('users', user_id, 'snapshots', f'{model_type}_finetuned.pt')
         if not os.path.exists(model_path):
             return jsonify({'error': 'No trained model found'}), 400
-
-        upload_dir = os.path.join('users', user_id, 'uploads')
-        converted_dir = os.path.join('users', user_id, 'converted')
         
-        # Find the uploaded image
-        image_files = [f for f in os.listdir(upload_dir) if f.lower().endswith(('.tiff', '.tif', '.png', '.jpg', '.jpeg'))]
-        if not image_files:
-            return jsonify({'error': 'No image uploaded'}), 400
-            
-        image_path = os.path.join(upload_dir, image_files[0])
-        
-        # Create normalized version
-        temp_normalized_path = os.path.join(converted_dir, 'temp_normalized.png')
-        normalize_image(image_path, temp_normalized_path)
-        
-        # Load model and predict
-        model = YOLO(model_path)
-        results = model.predict(
-            source=temp_normalized_path,
-            conf=threshold,
-            save=False,
-            save_txt=False,
-            save_conf=True
-        )
-
-        # Clean up temp file
-        try:
-            os.remove(temp_normalized_path)
-        except:
-            pass
-
-        # Get original image dimensions
-        with Image.open(image_path) as img:
-            orig_width, orig_height = img.size
-
-        # Process results to YOLO format
-        yolo_lines = []
-        for result in results:
-            for box in result.boxes:
-                x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
-                conf = box.conf.item()
-                cls = int(box.cls.item())
-                
-                # Convert to normalized center coordinates
-                center_x = (x1 + x2) / 2.0 / orig_width
-                center_y = (y1 + y2) / 2.0 / orig_height
-                width = (x2 - x1) / orig_width
-                height = (y2 - y1) / orig_height
-
-                line = f"{cls} {center_x:.6f} {center_y:.6f} {width:.6f} {height:.6f}"
-                yolo_lines.append(line)
+        annotations, img_width, img_height, error = detect_with_tiling(user_id, model_path)
+        if error:
+            return jsonify({'error': error}), 500
 
         return jsonify({
-            "annotations": "\n".join(yolo_lines),
-            "image_width": orig_width,
-            "image_height": orig_height
+            "annotations": annotations,
+            "image_width": img_width,
+            "image_height": img_height
         })
 
     except Exception as e:
