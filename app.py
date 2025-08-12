@@ -26,85 +26,109 @@ from scripts.normalization import normalize_image
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))  # Gets directory where app.py is
 
 def batch_process_image_yolo(user_id, image_path, detection_type, threshold, model_path=None, cell_diameter=34):
-    """Process single image using YOLO pipeline"""
+    """
+    Minimal-safe batch processing:
+      - normalize (for detection only) -> detection image (PNG)
+      - run split -> detect -> merge using the detection image dimensions
+      - create a scaled copy of the ORIGINAL TIFF (no normalization applied) sized to detection dims
+      - save merged .txt next to the scaled TIFF
+      - return paths to scaled TIFF and matching TXT
+    """
     try:
-        # Setup directories
+        # --- per-user directories ---
         upload_dir = os.path.join('users', user_id, 'uploads')
         final_dir = os.path.join('users', user_id, 'finaloutput')
         tiles_dir = os.path.join('users', user_id, 'images', 'tiles')
         output_txt_dir = os.path.join('users', user_id, 'images', 'tiles_output')
-        
-        # Clear directories
-        for d in [tiles_dir, output_txt_dir, final_dir]:
-            if os.path.exists(d):
-                shutil.rmtree(d)
-            os.makedirs(d, exist_ok=True)
 
-        # PRESERVE ORIGINAL PATH
+        # Ensure directories exist and are clean for this run
+        for d in [tiles_dir, output_txt_dir]:
+            shutil.rmtree(d, ignore_errors=True)
+            os.makedirs(d, exist_ok=True)
+        os.makedirs(final_dir, exist_ok=True)
+
         original_tiff_path = image_path
-        
-        # Create normalized version for detection
-        normalized_path = os.path.join(upload_dir, f"normalized_{os.path.basename(image_path)}.png")
-        normalize_image(image_path, normalized_path)
-        
-        # Apply scaling if needed
-        if cell_diameter != 34.0:
-            scaling_factor = 34.0 / cell_diameter
+        base_name = os.path.splitext(os.path.basename(image_path))[0]
+
+        # --- 1) Create a normalized PNG (detection-only). Use unique name to avoid collisions ---
+        norm_uuid = uuid.uuid4().hex[:8]
+        normalized_basename = f"normalized_{norm_uuid}_{base_name}.png"
+        normalized_path = os.path.join(upload_dir, normalized_basename)
+        normalize_image(image_path, normalized_path)  # this is detection-only
+
+        # --- 2) Optionally scale the normalized PNG for detection ---
+        scaling_factor = 1.0
+        if float(cell_diameter) != 34.0:
+            scaling_factor = 34.0 / float(cell_diameter)
             with Image.open(normalized_path) as img:
                 w, h = img.size
-                new_w = int(w * scaling_factor)
-                new_h = int(h * scaling_factor)
-                scaled_img = img.resize((new_w, new_h), Image.Resampling.LANCZOS)
-                # Save scaled version as PNG
-                scaled_path = os.path.join(upload_dir, f"scaled_{os.path.basename(image_path)}.png")
-                scaled_img.save(scaled_path)
-                detection_path = scaled_path
+                det_w = max(1, int(round(w * scaling_factor)))
+                det_h = max(1, int(round(h * scaling_factor)))
+                scaled_norm_name = f"scaled_norm_{norm_uuid}_{base_name}.png"
+                scaled_norm_path = os.path.join(upload_dir, scaled_norm_name)
+                scaled_img = img.resize((det_w, det_h), Image.Resampling.LANCZOS)
+                # Save PNG (for detection)
+                scaled_img.save(scaled_norm_path, format='PNG')
+                detection_path = scaled_norm_path
         else:
+            with Image.open(normalized_path) as img:
+                det_w, det_h = img.size
             detection_path = normalized_path
 
-        # Determine model path
+        # --- 3) Select model ---
         model_map = {
             'SGN': 'snapshots/SGN_best.pt',
             'MADM': 'snapshots/MADM_best.pt',
             'CD3': 'snapshots/cd3_v2.pt'
         }
         model_path = model_path or model_map.get(detection_type)
-        
         if not model_path:
-            return {'success': False, 'error': 'Invalid model configuration'}
+            return {'success': False, 'error': 'Invalid model configuration (no model found)'}
 
-        # Run detection pipeline on DETECTION IMAGE (normalized/scaled)
-        subprocess.run(['python3', 'scripts/split_image.py', 
-                        '--image', detection_path, '--output', tiles_dir], check=True)
-        
+        # --- 4) Split detection image into tiles, detect, then merge using detection dims ---
+        subprocess.run(['python3', 'scripts/split_image.py', '--image', detection_path, '--output', tiles_dir], check=True)
         detect_tiles_in_batch(tiles_dir, output_txt_dir, model_path, threshold)
-        
-        # GET ORIGINAL DIMENSIONS
-        with Image.open(original_tiff_path) as img:
-            img_width, img_height = img.size
-            
-        merged_output = os.path.join(final_dir, 'merged.txt')
+
+        # Ensure we have detection dimensions (defensive)
+        with Image.open(detection_path) as dimg:
+            det_w, det_h = dimg.size
+
+        # merged txt filename unique + paired with scaled tiff base
+        out_uuid = uuid.uuid4().hex[:8]
+        out_base = f"{base_name}_scaled_{int(round(float(cell_diameter)))}_{out_uuid}"
+        merged_txt_path = os.path.join(final_dir, out_base + ".txt")
+
+        # merge_annotations must write the YOLO-format annotations normalized for det_w/det_h
         subprocess.run([
             'python3', 'scripts/merge_annotations.py',
             '--tiles', output_txt_dir,
-            '--output', merged_output,
-            '--image_width', str(img_width),  # Use original dimensions
-            '--image_height', str(img_height)
+            '--output', merged_txt_path,
+            '--image_width', str(det_w),
+            '--image_height', str(det_h)
         ], check=True)
-        
-        # Read results
-        with open(merged_output, 'r') as f:
-            annotations = f.read()
-            
+
+        # --- 5) Create a SCALED COPY of the ORIGINAL TIFF (preserve mode/bitdepth) ---
+        scaled_tiff_path = os.path.join(final_dir, out_base + ".tiff")
+        with Image.open(original_tiff_path) as orig_img:
+            # Resize but DO NOT convert mode — this preserves the original "look" (e.g. pitch black)
+            scaled_orig = orig_img.resize((det_w, det_h), Image.Resampling.LANCZOS)
+            # Save as TIFF without forcing RGB conversion
+            scaled_orig.save(scaled_tiff_path, format='TIFF')
+
+        # Done — return paired paths
         return {
-            'success': True, 
-            'annotations': annotations, 
-            'filename': os.path.basename(original_tiff_path),  # Return original filename
-            'original_path': original_tiff_path  # Return original path
+            'success': True,
+            'tiff_path': scaled_tiff_path,
+            'txt_path': merged_txt_path,
+            'det_width': det_w,
+            'det_height': det_h,
+            'scaling_factor': scaling_factor
         }
-        
+
     except Exception as e:
+        # Return exception info so batch-detect can include error files in ZIP
         return {'success': False, 'error': str(e)}
+
 
 
 def detect_with_tiling(user_id, model_path, threshold=0.5): #Helper function for fine tuning testing on singular image
@@ -588,14 +612,19 @@ def clear_training_data():
     user_id = session['user_id']
     saved_data_dir = os.path.join('users', user_id, 'saved_data')
     saved_annotations_dir = os.path.join('users', user_id, 'saved_annotations')
+    yolo_dataset_dir = os.path.join('users', user_id, 'yolo_dataset')  # New directory to clear
+    
     try:
         # Clear saved data
-        data_folder = saved_data_dir
-        clear_folder(data_folder)
+        clear_folder(saved_data_dir)
         
         # Clear saved annotations
-        annotations_folder = saved_annotations_dir
-        clear_folder(annotations_folder)
+        clear_folder(saved_annotations_dir)
+        
+        # Clear YOLO dataset if it exists
+        if os.path.exists(yolo_dataset_dir):
+            shutil.rmtree(yolo_dataset_dir, ignore_errors=True)
+            print(f"Cleared YOLO dataset directory for user: {user_id}")
         
         return jsonify({'message': 'Training data cleared successfully'})
     
@@ -1082,64 +1111,87 @@ def detect_finetuned():
 
 @app.route('/batch-detect', methods=['POST'])
 def batch_detect():
-    user_id = session['user_id']
+    user_id = session.get('user_id')
+    if not user_id:
+        return jsonify({'error': 'No active user session'}), 400
+
     try:
-        # Setup batch directory
+        # 1) Save uploaded files into a temp per-user directory
         batch_dir = os.path.join('users', user_id, 'batch_temp')
         os.makedirs(batch_dir, exist_ok=True)
+        # clear existing files
         clear_folder(batch_dir)
 
-        # Save uploaded files
-        for file in request.files.getlist('images'):
-            file.save(os.path.join(batch_dir, secure_filename(file.filename)))
-        
-        # Get parameters
-        detection_type = request.form['detection_type']
-        threshold = float(request.form.get('threshold', 0.5))
-        custom_model = request.files.get('custom_model')
-        cell_diameter = float(request.form.get('cell_diameter', 34))
+        uploaded_files = request.files.getlist('images')
+        if not uploaded_files:
+            return jsonify({'error': 'No images uploaded for batch.'}), 400
 
-        # Handle custom model
-        model_path = None
-        if detection_type == 'custom' and custom_model:
-            model_path = os.path.join(batch_dir, 'custom_model.pt')
-            custom_model.save(model_path)
-
-        # Process images
-        results = []
-        for filename in os.listdir(batch_dir):
-            if filename == 'custom_model.pt':
+        for f in uploaded_files:
+            fname = secure_filename(f.filename)
+            if not fname:
                 continue
-                
-            file_path = os.path.join(batch_dir, filename)
-            if os.path.isfile(file_path) and filename.lower().endswith(('.tiff', '.tif')):
-                result = batch_process_image_yolo(
-                    user_id=user_id,
-                    image_path=file_path,  # Original TIFF path
-                    detection_type=detection_type,
-                    threshold=threshold,
-                    model_path=model_path,
-                    cell_diameter=cell_diameter
-                )
-                results.append(result)
+            f.save(os.path.join(batch_dir, fname))
 
-        # Create ZIP
+        # 2) Read form params
+        detection_type = request.form.get('detection_type', 'SGN')
+        threshold = float(request.form.get('threshold', 0.5))
+        cell_diameter = float(request.form.get('cell_diameter', 34))
+        custom_model_file = request.files.get('custom_model')
+
+        model_path = None
+        if detection_type == 'custom' and custom_model_file:
+            cp = os.path.join(batch_dir, 'custom_model.pt')
+            custom_model_file.save(cp)
+            model_path = cp
+
+        # 3) Process images one-by-one and collect results
+        results = []
+        for fname in sorted(os.listdir(batch_dir)):
+            if fname == 'custom_model.pt':
+                continue
+            input_path = os.path.join(batch_dir, fname)
+            if not os.path.isfile(input_path):
+                continue
+            if not fname.lower().endswith(('.tif', '.tiff', '.png', '.jpg', '.jpeg')):
+                continue
+
+            res = batch_process_image_yolo(user_id, input_path, detection_type, threshold, model_path=model_path, cell_diameter=cell_diameter)
+            # add original filename for diagnostics
+            res['original_filename'] = fname
+            results.append(res)
+
+        # 4) Build ZIP with exact pairs: tiff + matching .txt (or an error file for failures)
         zip_buffer = io.BytesIO()
-        with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zipf:
-            for result in results:
-                if result['success']:
-                    base_name = os.path.splitext(result['filename'])[0]
-                    # Add annotations file
-                    zipf.writestr(f"{base_name}.txt", result['annotations'])
-                    # Add ORIGINAL TIFF file
-                    zipf.write(
-                        result['original_path'],  # Use original TIFF path
-                        result['filename']
-                    )
+        with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zf:
+            for res in results:
+                orig = res.get('original_filename', 'unknown')
+                if not res.get('success'):
+                    err_name = os.path.splitext(orig)[0] + '_ERROR.txt'
+                    zf.writestr(err_name, res.get('error', 'processing error'))
+                    continue
 
-        # Cleanup
-        shutil.rmtree(batch_dir, ignore_errors=True)
+                tiff_path = res.get('tiff_path')
+                txt_path = res.get('txt_path')
+
+                # defensive existence checks
+                if tiff_path and os.path.exists(tiff_path):
+                    zf.write(tiff_path, os.path.basename(tiff_path))
+                else:
+                    # include a small note if the TIFF is missing
+                    zf.writestr(os.path.splitext(orig)[0] + '_MISSING_TIFF.txt', f"Missing TIFF for {orig}")
+
+                if txt_path and os.path.exists(txt_path):
+                    zf.write(txt_path, os.path.basename(txt_path))
+                else:
+                    zf.writestr(os.path.splitext(orig)[0] + '_MISSING_TXT.txt', f"Missing TXT for {orig}")
+
         zip_buffer.seek(0)
+
+        # 5) Cleanup temp upload folder (keep finaloutput intact)
+        try:
+            shutil.rmtree(batch_dir, ignore_errors=True)
+        except Exception:
+            pass
 
         return send_file(
             zip_buffer,
@@ -1150,6 +1202,7 @@ def batch_detect():
 
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
     
 
 
