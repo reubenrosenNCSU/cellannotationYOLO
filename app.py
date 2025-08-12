@@ -25,7 +25,89 @@ from ultralytics import YOLO
 from scripts.normalization import normalize_image
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))  # Gets directory where app.py is
 
-def detect_with_tiling(user_id, model_path, threshold=0.5):
+def batch_process_image_yolo(user_id, image_path, detection_type, threshold, model_path=None, cell_diameter=34):
+    """Process single image using YOLO pipeline"""
+    try:
+        # Setup directories
+        upload_dir = os.path.join('users', user_id, 'uploads')
+        final_dir = os.path.join('users', user_id, 'finaloutput')
+        tiles_dir = os.path.join('users', user_id, 'images', 'tiles')
+        output_txt_dir = os.path.join('users', user_id, 'images', 'tiles_output')
+        
+        # Clear directories
+        for d in [tiles_dir, output_txt_dir, final_dir]:
+            if os.path.exists(d):
+                shutil.rmtree(d)
+            os.makedirs(d, exist_ok=True)
+
+        # PRESERVE ORIGINAL PATH
+        original_tiff_path = image_path
+        
+        # Create normalized version for detection
+        normalized_path = os.path.join(upload_dir, f"normalized_{os.path.basename(image_path)}.png")
+        normalize_image(image_path, normalized_path)
+        
+        # Apply scaling if needed
+        if cell_diameter != 34.0:
+            scaling_factor = 34.0 / cell_diameter
+            with Image.open(normalized_path) as img:
+                w, h = img.size
+                new_w = int(w * scaling_factor)
+                new_h = int(h * scaling_factor)
+                scaled_img = img.resize((new_w, new_h), Image.Resampling.LANCZOS)
+                # Save scaled version as PNG
+                scaled_path = os.path.join(upload_dir, f"scaled_{os.path.basename(image_path)}.png")
+                scaled_img.save(scaled_path)
+                detection_path = scaled_path
+        else:
+            detection_path = normalized_path
+
+        # Determine model path
+        model_map = {
+            'SGN': 'snapshots/SGN_best.pt',
+            'MADM': 'snapshots/MADM_best.pt',
+            'CD3': 'snapshots/cd3_v2.pt'
+        }
+        model_path = model_path or model_map.get(detection_type)
+        
+        if not model_path:
+            return {'success': False, 'error': 'Invalid model configuration'}
+
+        # Run detection pipeline on DETECTION IMAGE (normalized/scaled)
+        subprocess.run(['python3', 'scripts/split_image.py', 
+                        '--image', detection_path, '--output', tiles_dir], check=True)
+        
+        detect_tiles_in_batch(tiles_dir, output_txt_dir, model_path, threshold)
+        
+        # GET ORIGINAL DIMENSIONS
+        with Image.open(original_tiff_path) as img:
+            img_width, img_height = img.size
+            
+        merged_output = os.path.join(final_dir, 'merged.txt')
+        subprocess.run([
+            'python3', 'scripts/merge_annotations.py',
+            '--tiles', output_txt_dir,
+            '--output', merged_output,
+            '--image_width', str(img_width),  # Use original dimensions
+            '--image_height', str(img_height)
+        ], check=True)
+        
+        # Read results
+        with open(merged_output, 'r') as f:
+            annotations = f.read()
+            
+        return {
+            'success': True, 
+            'annotations': annotations, 
+            'filename': os.path.basename(original_tiff_path),  # Return original filename
+            'original_path': original_tiff_path  # Return original path
+        }
+        
+    except Exception as e:
+        return {'success': False, 'error': str(e)}
+
+
+def detect_with_tiling(user_id, model_path, threshold=0.5): #Helper function for fine tuning testing on singular image
     """Tiling detection with normalization matching SGN/CD3 pipeline"""
     try:
         # Find uploaded image
@@ -997,133 +1079,63 @@ def detect_finetuned():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
-def batch_process_image(user_id, image_path, detection_type, threshold, model_path=None,class_type='SGN', cell_diameter=34):
-    """Process single image using existing pipeline"""
-    try:
-        # Get user directories
-        upload_dir = os.path.join('users', user_id, 'uploads')
-        input_dir = os.path.join('users', user_id, 'input')
-        images_dir = os.path.join('users', user_id, 'images')
-        output_dir = os.path.join('users', user_id, 'output')
-        final_dir = os.path.join('users', user_id, 'finaloutput')
-
-        # Clear directories before processing
-        for dir_path in [upload_dir, input_dir, images_dir, output_dir, final_dir]:
-            clear_folder(dir_path)
-            os.makedirs(dir_path, exist_ok=True)
-
-        # Copy image to uploads
-        shutil.copy(image_path, os.path.join(upload_dir, os.path.basename(image_path)))
-
-        # Scale image
-        with Image.open(image_path) as img:
-            scaling_factor = 34.0 / cell_diameter
-            new_width = int(img.width * scaling_factor)
-            new_height = int(img.height * scaling_factor)
-            scaled_img = img.resize((new_width, new_height), Image.Resampling.LANCZOS)
-            scaled_img.save(image_path, format='TIFF', compression='tiff_deflate')
-
-
-        if detection_type == 'SGN':
-            scripts = [
-                ['python3', 'scripts/8to16bit.py', upload_dir, input_dir],
-                ['python3', 'scripts/splitimage.py', input_dir, images_dir],
-                ['python3', 'scripts/detection_SGN.py', images_dir, output_dir, str(threshold)],
-                ['python3', 'scripts/mergecsv.py', os.path.join(output_dir, 'output_csv'), 
-                 os.path.join(final_dir, 'annotations.csv')]
-            ]
-        elif detection_type == 'MADM':
-            scripts = [
-                ['python3', 'scripts/8to16bit.py', upload_dir, input_dir],
-                ['python3', 'scripts/splitimage.py', input_dir, images_dir],
-                ['python3', 'scripts/detection.py', images_dir, output_dir, str(threshold)],
-                ['python3', 'scripts/mergecsv.py', os.path.join(output_dir, 'output_csv'),
-                 os.path.join(final_dir, 'annotations.csv')]
-            ]
-        else:  # Custom
-            # Determine which script to use based on class type
-            if class_type == 'SGN':
-                script_name = 'scripts/batch_SGN_custom.py'
-            else:
-                script_name = 'scripts/batch_MADM_custom.py'
-                
-            scripts = [
-                ['python3', 'scripts/8to16bit.py', upload_dir, input_dir],
-                ['python3', 'scripts/splitimage.py', input_dir, images_dir],
-                ['python3', script_name, images_dir, output_dir, str(threshold), model_path],
-                ['python3', 'scripts/mergecsv.py', os.path.join(output_dir, 'output_csv'), 
-                os.path.join(final_dir, 'annotations.csv')]
-            ]
-
-        # Execute scripts
-        for script in scripts:
-            result = subprocess.run(script, capture_output=True, text=True)
-            if result.returncode != 0:
-                return {'success': False, 'error': result.stderr}
-
-        # Read results
-        csv_path = os.path.join(final_dir, 'annotations.csv')
-        with open(csv_path, 'r') as f:
-            return {'success': True, 'csv': f.read(), 'filename': os.path.basename(image_path)}
-
-    except Exception as e:
-        return {'success': False, 'error': str(e)}
 
 @app.route('/batch-detect', methods=['POST'])
 def batch_detect():
     user_id = session['user_id']
     try:
-        # Create batch directory
+        # Setup batch directory
         batch_dir = os.path.join('users', user_id, 'batch_temp')
         os.makedirs(batch_dir, exist_ok=True)
-        clear_folder(batch_dir)  # Clear previous temp files
+        clear_folder(batch_dir)
 
         # Save uploaded files
         for file in request.files.getlist('images'):
             file.save(os.path.join(batch_dir, secure_filename(file.filename)))
-
+        
         # Get parameters
         detection_type = request.form['detection_type']
         threshold = float(request.form.get('threshold', 0.5))
         custom_model = request.files.get('custom_model')
-        class_type = request.form.get('class_type', 'SGN')
         cell_diameter = float(request.form.get('cell_diameter', 34))
 
         # Handle custom model
         model_path = None
         if detection_type == 'custom' and custom_model:
-            model_path = os.path.join(batch_dir, 'custom_model.h5')
+            model_path = os.path.join(batch_dir, 'custom_model.pt')
             custom_model.save(model_path)
 
-        # Process each image
+        # Process images
         results = []
         for filename in os.listdir(batch_dir):
+            if filename == 'custom_model.pt':
+                continue
+                
             file_path = os.path.join(batch_dir, filename)
             if os.path.isfile(file_path) and filename.lower().endswith(('.tiff', '.tif')):
-                result = batch_process_image(
+                result = batch_process_image_yolo(
                     user_id=user_id,
-                    image_path=file_path,
+                    image_path=file_path,  # Original TIFF path
                     detection_type=detection_type,
                     threshold=threshold,
                     model_path=model_path,
-                    class_type=class_type,
                     cell_diameter=cell_diameter
                 )
-                if result['success']:
-                    results.append({
-                        'csv': result['csv'],
-                        'image': filename,
-                        'csv_name': f"{os.path.splitext(filename)[0]}_annotations.csv"
-                    })
+                results.append(result)
 
         # Create ZIP
         zip_buffer = io.BytesIO()
         with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zipf:
             for result in results:
-                # Add CSV
-                zipf.writestr(result['csv_name'], result['csv'])
-                # Add original image
-                zipf.write(os.path.join(batch_dir, result['image']), result['image'])
+                if result['success']:
+                    base_name = os.path.splitext(result['filename'])[0]
+                    # Add annotations file
+                    zipf.writestr(f"{base_name}.txt", result['annotations'])
+                    # Add ORIGINAL TIFF file
+                    zipf.write(
+                        result['original_path'],  # Use original TIFF path
+                        result['filename']
+                    )
 
         # Cleanup
         shutil.rmtree(batch_dir, ignore_errors=True)
