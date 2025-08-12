@@ -824,12 +824,13 @@ document.getElementById('start-batch').addEventListener('click', async () => {
     
     Array.from(files).forEach(file => formData.append('images', file));
     
-    if (document.getElementById('detection-type').value === 'custom') {
+    const detectionType = document.getElementById('detection-type').value;
+    if (detectionType === 'custom') {
         const model = document.getElementById('custom-model').files[0];
         if (!model) return alert('Please select a model!');
         formData.append('custom_model', model);
-        formData.append('class_type', 
-        document.getElementById('custom-class-type').value);
+        formData.append('model_type', 
+            document.getElementById('batch-model-type').value);
     }
     
     try {
@@ -1942,45 +1943,46 @@ document.getElementById('fine-tune-btn').addEventListener('click', () => {
     z-index: 1000;
     min-width: 400px;
 ">
-    <h3 style="margin-top: 0; color: #333;">Batch Processing</h3>
+    <h3>Batch Processing</h3>
     <input type="file" id="batch-files" multiple accept=".tiff,.tif" hidden>
     <button class="btn" onclick="document.getElementById('batch-files').click()" 
             style="margin-bottom: 15px;">
         Select Images
     </button>
     <div id="file-count" style="margin-bottom: 15px; color: #666;">0 files selected</div>
-    
+
     <select id="detection-type" class="btn" style="margin-bottom: 15px;">
         <option value="SGN">Detect SGN</option>
         <option value="MADM">Detect MADM</option>
-        <option value="CD3">Detect CD3</option>
+        <option value="CD3">Detect CD3</option>  <!-- Added CD3 option -->
         <option value="custom">Custom Model</option>
     </select>
-    
-    <div id="custom-model-ui" style="display: none; margin-bottom: 15px;">
-        <input type="file" id="custom-model" accept=".h5" hidden>
-        <button class="btn" onclick="document.getElementById('custom-model').click()">
-            Upload Model (.h5)
-        </button>
-    <!-- Add class type selection -->
-    <div style="margin-top: 10px;">
-        <label>Model Type:</label>
-        <select id="custom-class-type" class="btn" style="width: 100%; margin-top: 5px;">
-            <option value="SGN">SGN Class</option>
-            <option value="MADM">MADM Class</option>
-        </select>
+
+  <div id="custom-model-ui" style="display: none; margin-bottom: 15px;">
+    <div style="margin-bottom: 10px;">
+      <label>Model Type:</label>
+      <select id="batch-model-type" class="btn" style="width: 100%;">
+        <option value="SGN">SGN Model</option>
+        <option value="MADM">MADM Model</option>
+        <option value="CD3">CD3 Model</option>
+      </select>
     </div>
-    </div>
+    <input type="file" id="custom-model" accept=".pt" hidden>
+    <button class="btn" onclick="document.getElementById('custom-model').click()">
+      Upload Model (.pt)
+    </button>
+  </div>
+
     <label for="batch-threshold" style="display: block; margin-bottom: 5px;">Detection Threshold (0-1):</label>
     <input type="number" id="batch-threshold" value="0.5" step="0.1" min="0" max="1" 
-           class="btn" style="margin-bottom: 15px; width: 100%;">
-    
+            class="btn" style="margin-bottom: 15px; width: 100%;">
+
     <div style="margin-bottom: 15px;">
     <label for="batch-cell-diameter" style="display: block; margin-bottom: 5px;">Typical cell diameter in batch(px):</label>
     <input type="number" id="batch-cell-diameter" class="btn" 
             value="34" step="1" min="1" style="width: 100%;">
     </div>
-    
+
     <div style="display: flex; gap: 10px;">
         <button class="btn" id="start-batch" 
                 style="flex: 1; background: #4CAF50;">Process</button>
