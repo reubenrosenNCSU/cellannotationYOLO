@@ -29,14 +29,14 @@ function App() {
   // Steate for annotations
   const [annotations, setAnnotations] = useState([])
   const [classes, setClasses] = useState([
-    { name: 'SGN', color: '#c600b9ff' },
-    { name: 'Yellow Neuron', color: '#FFC300' },
-    { name: 'Yellow Astrocyte', color: '#767600ff' },
-    { name: 'Green Neuron', color: '#2ECC71' },
-    { name: 'Green Astrocyte', color: '#003b1936' },
-    { name: 'Red Neuron', color: '#C0392B' },
-    { name: 'Red Astrocyte', color: '#4c0800ff' },
-    { name: 'CD3', color: '#600089ff' },
+    { name: 'SGN', color: '#CA00BC' },
+    { name: 'Yellow Neuron', color: '#FAF38F' },
+    { name: 'Yellow Astrocyte', color: '#FFBB00' },
+    { name: 'Green Neuron', color: '#B3FFD2' },
+    { name: 'Green Astrocyte', color: '#066A30' },
+    { name: 'Red Neuron', color: '#FAABA2' },
+    { name: 'Red Astrocyte', color: '#B03022' },
+    { name: 'CD3', color: '#600089' },
   ])
   const [currentClass, setCurrentClass] = useState(0)
 
@@ -392,9 +392,10 @@ function App() {
 			),
 		},
 		{
-			label: "Detect",
+			label: "Models",
 			content: (
         <Box>
+          <Typography variant='h6'>Detect</Typography>
           <PopupState variant="popover" popupId="model-popup-menu">
             {(popupState) => (
               <Fragment>
@@ -414,9 +415,6 @@ function App() {
               </Fragment>
             )}
           </PopupState>
-          <Button variant='contained' component='label' onClick={detect}>
-            Detect
-          </Button>
           <TextField
             value={threshold}
             onChange={(e) => setThreshold(Number(e.target.value))}
@@ -431,6 +429,14 @@ function App() {
               }
             }}
           />
+          <Box display='flex' flexDirection='row'>
+            <Button variant='contained' component='label' onClick={detect}>
+              Single Detect
+            </Button>
+            <Button variant='contained' component='label' onClick={detect}>
+              Batch Detect
+            </Button>
+          </Box>
         </Box>
       )
 		}
