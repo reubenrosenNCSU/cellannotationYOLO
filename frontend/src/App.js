@@ -1,5 +1,5 @@
 import { useState, Fragment } from 'react'
-import { Box, Button, Typography } from '@mui/material'
+import { Box, Button, Typography, Modal } from '@mui/material'
 import PopupState, { bindTrigger, bindMenu } from 'material-ui-popup-state'
 import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown'
 import Menu from '@mui/material/Menu'
@@ -41,13 +41,18 @@ function App() {
   const [currentClass, setCurrentClass] = useState(0)
 
   // State for model detection
-  const [models, setModels] = useState(['SGN', 'CD3', 'MADM'])
+  const [models] = useState(['SGN', 'CD3', 'MADM'])
   const [currentModel, setCurrentModel] = useState(0)
   const [threshold, setThreshold] = useState(.5)
+  const [cellDiameter, setCellDiameter] = useState(34)
+
+  // State for batch detection
+  const [selectedFiles, setSelectedFiles] = useState([])
 
   
   // *----------* Image Operations *----------* \\
 
+  // Uploads the users chosen image to the server and renders it to the canvas
   async function handleUpload(e) {
     const file = e.target.files[0]
     e.target.value = null
@@ -78,6 +83,18 @@ function App() {
     } catch(e) {
       alert('Upload failed: ' + (e.response?.data?.error || e.message))
     }
+  }
+
+  // Adds images selected by the user to the group to be used for batch detection
+  function addToBatch(e) {
+    const files = e.target.files;
+
+    if (files && files.length > 0) {
+      const newFiles = Array.from(files);
+      setSelectedFiles((prevFiles) => [...prevFiles, ...newFiles]);
+    }
+
+    e.target.value = '';
   }
 
   function handleSave() {
@@ -349,7 +366,86 @@ function App() {
     }
   }
 
-  // Tab Menu contents
+  async function handleBatchDetect() {
+    if (selectedFiles.length === 0) return alert('Please select images!');
+
+    const formData = new FormData();
+
+    if (currentModel === 0) {
+      formData.append('detection_type', 'SGN')
+    } else if (currentModel === 1) {
+      formData.append('detection_type', 'CD3')
+    } else if (currentModel === 2) {
+      formData.append('detection_type', 'MADM')
+    } else {
+      console.log('Invalid Model Selection')
+      return
+    }
+
+    formData.append('threshold', threshold)
+    formData.append('cell_diameter', cellDiameter)
+    selectedFiles.forEach(file => formData.append('images', file));
+
+    // if (detectionType === 'custom') {
+    //   const model = document.getElementById('custom-model').files[0];
+    //   if (!model) return alert('Please select a model!');
+        
+    //   formData.append('custom_model', model);
+    //   formData.append('model_type', document.getElementById('batch-model-type').value);
+    // }
+    try {
+      const res = await fetch('/batch-detect', {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (!res.ok) throw new Error(`${models[currentModel]} batch detection failed`)
+      
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'batch_results.zip';
+      document.body.appendChild(a);
+      a.click();
+
+      document.body.removeChild(a);
+      window.URL.revokeObjectURL(url);
+
+      handleClose()
+      setSelectedFiles([])
+
+    } catch (error) {
+      console.error(error);
+      alert(`Error: ${error.message}`)
+    }
+  }
+
+  // *----------* Tab Menu Contents *----------* \\
+
+  // Batch detect modal state
+  const [open, setOpen] = useState(false);
+  const handleOpen = () => {
+    setOpen(true);
+  };
+  const handleClose = () => {
+    setOpen(false);
+  };
+
+  const modal_style = {
+    position: 'absolute',
+    top: '50%',
+    left: '50%',
+    transform: 'translate(-50%, -50%)',
+    width: 400,
+    bgcolor: 'background.paper',
+    border: '2px solid #000',
+    boxShadow: 24,
+    pt: 2,
+    px: 4,
+    pb: 3,
+  };
+  
   const tabs = [
 		{
 			label: "Annotate",
@@ -433,9 +529,43 @@ function App() {
             <Button variant='contained' component='label' onClick={detect}>
               Single Detect
             </Button>
-            <Button variant='contained' component='label' onClick={detect}>
+            <Button variant='contained' component='label' onClick={handleOpen}>
               Batch Detect
             </Button>
+            <Modal
+              open={open}
+              onClose={handleClose}
+            >
+              <Box sx={{...modal_style}}>
+                <Typography>Batch Detect</Typography>
+                <PopupState variant="popover" popupId="model-popup-menu">
+                  {(popupState) => (
+                    <Fragment>
+                      <Button variant="contained" {...bindTrigger(popupState)} endIcon={<KeyboardArrowDownIcon />}>
+                        {models[currentModel]}
+                      </Button>
+                      <Menu {...bindMenu(popupState)}>
+                        {models.map((item, index) => (
+                          <MenuItem 
+                            key={index}
+                            onClick={() => {setCurrentModel(index)}}
+                          >
+                              <Typography variant="body1">{item}</Typography>
+                          </MenuItem>
+                        ))}
+                      </Menu>
+                    </Fragment>
+                  )}
+                </PopupState>
+                <Button variant='contained' component='label'>
+                  Load Images
+                  <input hidden type='file' multiple accept='image/tiff' onChange={addToBatch} />
+                </Button>
+                <Typography>{selectedFiles.length} files selected</Typography>
+                <Button onClick={handleBatchDetect}>Process</Button>
+                <Button onClick={handleClose}>Cancel</Button>
+              </Box>
+            </Modal>
           </Box>
         </Box>
       )
