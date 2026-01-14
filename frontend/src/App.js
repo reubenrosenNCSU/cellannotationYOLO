@@ -316,7 +316,7 @@ function App() {
   // *----------* Detection Operations *----------* \\
 
   async function detect() {
-    const formData = new FormData()
+    const payload = {}
 
     let endpoint = ''
 
@@ -332,14 +332,14 @@ function App() {
         return
       }
       endpoint = '/detect-custom'
-      formData.append('pt_file', customModel)
-      formData.append('model_type', customModelType)
+      payload.pt_file = customModel
+      payload.model_type = customModelType
     } else {
       console.log('Invalid Model Selection')
       return
     }
 
-    formData.append('threshold', threshold)
+    payload.threshold = threshold
 
     try {
       const res = await fetch(endpoint, {
@@ -347,10 +347,10 @@ function App() {
         headers: {
           'Content-Type': 'application/json'
         },
-        body: formData,
+        body: JSON.stringify(payload),
         credentials: 'include',
       })
-
+      console.log(res)
       if (!res.ok) throw new Error(`${models[currentModel]} detection failed`)
       const data = await res.json()
       
