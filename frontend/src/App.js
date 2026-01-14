@@ -521,13 +521,13 @@ function App() {
 
   const tabs = [
 		{
-			label: "Annotate",
+			label: 'Annotate',
 			content: (
         <Box>
-          <PopupState variant="popover" popupId="class-popup-menu">
+          <PopupState variant='popover' popupId='class-popup-menu'>
             {(popupState) => (
               <Fragment>
-                <Button variant="contained" {...bindTrigger(popupState)} endIcon={<KeyboardArrowDownIcon />}>
+                <Button variant='contained' {...bindTrigger(popupState)} endIcon={<KeyboardArrowDownIcon />}>
                   {classes[currentClass].name}
                 </Button>
                 <Menu {...bindMenu(popupState)}>
@@ -536,7 +536,7 @@ function App() {
                       key={index}
                       onClick={() => {setCurrentClass(index)}}
                     >
-                        <Typography variant="body1">{item.name}</Typography>
+                        <Typography variant='body1'>{item.name}</Typography>
                     </MenuItem>
                   ))}
                 </Menu>
@@ -561,13 +561,13 @@ function App() {
 			),
 		},
 		{
-			label: "Detect",
+			label: 'Detect',
 			content: (
         <Box>
-          <PopupState variant="popover" popupId="model-popup-menu">
+          <PopupState variant='popover' popupId='model-popup-menu'>
             {(popupState) => (
               <Fragment>
-                <Button variant="contained" {...bindTrigger(popupState)} endIcon={<KeyboardArrowDownIcon />}>
+                <Button variant='contained' {...bindTrigger(popupState)} endIcon={<KeyboardArrowDownIcon />}>
                   {models[currentModel]}
                 </Button>
                 <Menu {...bindMenu(popupState)}>
@@ -576,7 +576,7 @@ function App() {
                       key={index}
                       onClick={() => {setCurrentModel(index)}}
                     >
-                        <Typography variant="body1">{item}</Typography>
+                        <Typography variant='body1'>{item}</Typography>
                     </MenuItem>
                   ))}
                 </Menu>
@@ -596,10 +596,10 @@ function App() {
                 Select File
                 <input hidden type='file' accept='.pt' onChange={handleLoadCustomModel} />
               </Button>
-              <PopupState variant="popover" popupId="model-popup-menu">
+              <PopupState variant='popover' popupId='model-popup-menu'>
                 {(popupState) => (
                   <Fragment>
-                    <Button variant="contained" {...bindTrigger(popupState)} endIcon={<KeyboardArrowDownIcon />}>
+                    <Button variant='contained' {...bindTrigger(popupState)} endIcon={<KeyboardArrowDownIcon />}>
                       {customModelType || 'Select Type'}
                     </Button>
                     <Menu {...bindMenu(popupState)}>
@@ -608,7 +608,7 @@ function App() {
                           key={index}
                           onClick={() => {setCustomModelType(item)}}
                         >
-                            <Typography variant="body1">{item}</Typography>
+                            <Typography variant='body1'>{item}</Typography>
                         </MenuItem>
                       ))}
                     </Menu>
@@ -623,14 +623,27 @@ function App() {
           <TextField
             value={threshold}
             onChange={(e) => setThreshold(Number(e.target.value))}
-            type="number"
-            variant="outlined"
-            size="small"
+            type='number'
+            variant='outlined'
+            size='small'
             slotProps={{ 
               htmlInput: {
                 step: 0.1,
                 min: 0,
                 max: 1
+              }
+            }}
+          />
+          <TextField
+            value={cellDiameter}
+            onChange={(e) => setCellDiameter(Number(e.target.value))}
+            type='number'
+            variant='outlined'
+            size='small'
+            slotProps={{ 
+              htmlInput: {
+                step: 1,
+                min: 0
               }
             }}
           />
@@ -647,10 +660,10 @@ function App() {
             >
               <Box sx={{...modal_style}}>
                 <Typography>Batch Detect</Typography>
-                <PopupState variant="popover" popupId="model-popup-menu">
+                <PopupState variant='popover' popupId='model-popup-menu'>
                   {(popupState) => (
                     <Fragment>
-                      <Button variant="contained" {...bindTrigger(popupState)} endIcon={<KeyboardArrowDownIcon />}>
+                      <Button variant='contained' {...bindTrigger(popupState)} endIcon={<KeyboardArrowDownIcon />}>
                         {models[currentModel]}
                       </Button>
                       <Menu {...bindMenu(popupState)}>
@@ -659,7 +672,7 @@ function App() {
                             key={index}
                             onClick={() => {setCurrentModel(index)}}
                           >
-                              <Typography variant="body1">{item}</Typography>
+                              <Typography variant='body1'>{item}</Typography>
                           </MenuItem>
                         ))}
                       </Menu>
@@ -697,18 +710,18 @@ function App() {
 
         <Stack spacing={2} sx={{ width: '100%' }}>
           <AdjustableSlider
-            label="Brightness"
+            label='Brightness'
             value={brightness}
-            onChange={(e, val) => setBrightness(val)}
+            onChange={(val) => setBrightness(val)}
             min={bMin}
             setMin={setBMin}
             max={bMax}
             setMax={setBMax}
           />
           <AdjustableSlider
-            label="Contrast"
+            label='Contrast'
             value={contrast}
-            onChange={(e, val) => setContrast(val)}
+            onChange={(val) => setContrast(val)}
             min={cMin}
             setMin={setCMin}
             max={cMax}
