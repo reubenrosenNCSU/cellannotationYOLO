@@ -41,10 +41,17 @@ function App() {
   const [currentClass, setCurrentClass] = useState(0)
 
   // State for model detection
-  const [models] = useState(['SGN', 'CD3', 'MADM'])
+  const [models] = useState(['SGN', 'CD3', 'MADM', 'Custom'])
   const [currentModel, setCurrentModel] = useState(0)
   const [threshold, setThreshold] = useState(.5)
   const [cellDiameter, setCellDiameter] = useState(34)
+  const [customModel, setCustomModel] = useState()
+  const [modelTypes] = useState(['SGN', 'CD3', 'MADM'])
+  const [customModelType, setCustomModelType] = useState('')
+  const [customModelName, setCustomModelName] = useState('')
+  const [lastCustomModel, setLastCustomModel] = useState()
+  const [lastCustomModelType, setLastCustomModelType] = useState('')
+  const [lastCustomModelName, setLastCustomModelName] = useState('')
 
   // State for batch detection
   const [selectedFiles, setSelectedFiles] = useState([])
@@ -309,8 +316,7 @@ function App() {
   // *----------* Detection Operations *----------* \\
 
   async function detect() {
-
-    console.log(currentModel)
+    const formData = new FormData()
 
     let endpoint = ''
 
@@ -320,9 +326,20 @@ function App() {
       endpoint = '/detect-cd3'
     } else if (currentModel === 2) {
       endpoint = '/detect-madm'
+    } else if (currentModel === 3) {
+      if (!customModel) {
+        alert('Please upload a custom model (.pt)')
+        return
+      }
+      endpoint = '/detect-custom'
+      formData.append('pt_file', customModel)
+      formData.append('model_type', customModelType)
     } else {
       console.log('Invalid Model Selection')
+      return
     }
+
+    formData.append('threshold', threshold)
 
     try {
       const res = await fetch(endpoint, {
@@ -330,7 +347,7 @@ function App() {
         headers: {
           'Content-Type': 'application/json'
         },
-        body: JSON.stringify({ threshold }),
+        body: formData,
         credentials: 'include',
       })
 
@@ -377,6 +394,14 @@ function App() {
       formData.append('detection_type', 'CD3')
     } else if (currentModel === 2) {
       formData.append('detection_type', 'MADM')
+    } else if (currentModel === 3) {
+      if (!customModel) {
+        alert('Please upload a custom model (.pt)')
+        return
+      }
+      formData.append('detection_type', 'custom')
+      formData.append('custom_model', customModel)
+      formData.append('model_type', customModelType)
     } else {
       console.log('Invalid Model Selection')
       return
@@ -385,7 +410,7 @@ function App() {
     formData.append('threshold', threshold)
     formData.append('cell_diameter', cellDiameter)
     selectedFiles.forEach(file => formData.append('images', file));
-
+    // TODO: Add custom model batch detect
     // if (detectionType === 'custom') {
     //   const model = document.getElementById('custom-model').files[0];
     //   if (!model) return alert('Please select a model!');
@@ -412,7 +437,7 @@ function App() {
       document.body.removeChild(a);
       window.URL.revokeObjectURL(url);
 
-      handleClose()
+      handleCloseBatchModal()
       setSelectedFiles([])
 
     } catch (error) {
@@ -421,15 +446,66 @@ function App() {
     }
   }
 
+  function handleLoadCustomModel(e) {
+    const file = e.target.files[0]
+    e.target.value = null
+    if (!file) return
+
+    if (!file.name.toLowerCase().endsWith('.pt')) {
+        alert('Only .pt files are accepted.')
+        e.target.value = ''
+        return
+    }
+    
+    setCustomModel(file)
+    setCustomModelName(file.name)
+    console.log(customModel)
+  }
+
+  function confirmCustom() {
+    if (!customModel) {
+      alert('Please upload a custom model (.pt)')
+      return
+    }
+
+    if (customModelType === '') {
+      alert('Please choose a model type')
+      return
+    }
+    
+    setLastCustomModel(customModel)
+    setLastCustomModelName(customModelName)
+    setLastCustomModelType(customModelType)
+
+    handleCloseCustomUploadModal()
+  }
+
+  function cancelCustom() {
+    setCustomModel(lastCustomModel)
+    setCustomModelName(lastCustomModelName)
+    setCustomModelType(lastCustomModelType)
+
+    handleCloseCustomUploadModal()
+  }
+
   // *----------* Tab Menu Contents *----------* \\
 
   // Batch detect modal state
-  const [open, setOpen] = useState(false);
-  const handleOpen = () => {
-    setOpen(true);
+  const [batchModalOpen, setBatchModalOpen] = useState(false);
+  const handleOpenBatchModal = () => {
+    setBatchModalOpen(true);
   };
-  const handleClose = () => {
-    setOpen(false);
+  const handleCloseBatchModal = () => {
+    setBatchModalOpen(false);
+  };
+
+  // Custom model upload modal state
+  const [customUploadModalOpen, setCustomUploadModalOpen] = useState(false);
+  const handleOpenCustomUploadModal = () => {
+    setCustomUploadModalOpen(true);
+  };
+  const handleCloseCustomUploadModal = () => {
+    setCustomUploadModalOpen(false);
   };
 
   const modal_style = {
@@ -445,7 +521,7 @@ function App() {
     px: 4,
     pb: 3,
   };
-  
+
   const tabs = [
 		{
 			label: "Annotate",
@@ -488,10 +564,9 @@ function App() {
 			),
 		},
 		{
-			label: "Models",
+			label: "Detect",
 			content: (
         <Box>
-          <Typography variant='h6'>Detect</Typography>
           <PopupState variant="popover" popupId="model-popup-menu">
             {(popupState) => (
               <Fragment>
@@ -511,6 +586,43 @@ function App() {
               </Fragment>
             )}
           </PopupState>
+          <Button variant='contained' component='label' onClick={handleOpenCustomUploadModal}>Load Custom</Button>
+          <Typography>Selected: {lastCustomModelName}</Typography>
+          <Typography>Type: {lastCustomModelType}</Typography>
+          <Modal
+            open={customUploadModalOpen}
+            onClose={cancelCustom}
+          >
+            <Box sx={{...modal_style}}>
+              <Typography>Load Custom Model</Typography>
+              <Button variant='contained' component='label'>
+                Select File
+                <input hidden type='file' accept='.pt' onChange={handleLoadCustomModel} />
+              </Button>
+              <PopupState variant="popover" popupId="model-popup-menu">
+                {(popupState) => (
+                  <Fragment>
+                    <Button variant="contained" {...bindTrigger(popupState)} endIcon={<KeyboardArrowDownIcon />}>
+                      {customModelType || 'Select Type'}
+                    </Button>
+                    <Menu {...bindMenu(popupState)}>
+                      {modelTypes.map((item, index) => (
+                        <MenuItem 
+                          key={index}
+                          onClick={() => {setCustomModelType(item)}}
+                        >
+                            <Typography variant="body1">{item}</Typography>
+                        </MenuItem>
+                      ))}
+                    </Menu>
+                  </Fragment>
+                )}
+              </PopupState>
+              <Typography>Selected: {customModelName}</Typography>
+              <Button onClick={confirmCustom}>Confirm</Button>
+              <Button onClick={cancelCustom}>Cancel</Button>
+            </Box>
+          </Modal>
           <TextField
             value={threshold}
             onChange={(e) => setThreshold(Number(e.target.value))}
@@ -529,12 +641,12 @@ function App() {
             <Button variant='contained' component='label' onClick={detect}>
               Single Detect
             </Button>
-            <Button variant='contained' component='label' onClick={handleOpen}>
+            <Button variant='contained' component='label' onClick={handleOpenBatchModal}>
               Batch Detect
             </Button>
             <Modal
-              open={open}
-              onClose={handleClose}
+              open={batchModalOpen}
+              onClose={handleCloseBatchModal}
             >
               <Box sx={{...modal_style}}>
                 <Typography>Batch Detect</Typography>
@@ -563,7 +675,7 @@ function App() {
                 </Button>
                 <Typography>{selectedFiles.length} files selected</Typography>
                 <Button onClick={handleBatchDetect}>Process</Button>
-                <Button onClick={handleClose}>Cancel</Button>
+                <Button onClick={handleCloseBatchModal}>Cancel</Button>
               </Box>
             </Modal>
           </Box>
