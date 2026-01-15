@@ -519,6 +519,11 @@ function App() {
     pb: 3,
   };
 
+  const button_style_span = {
+    width: '100%',
+    mb: 1
+  }
+
   const tabs = [
 		{
 			label: 'Annotate',
@@ -527,7 +532,7 @@ function App() {
           <PopupState variant='popover' popupId='class-popup-menu'>
             {(popupState) => (
               <Fragment>
-                <Button variant='contained' {...bindTrigger(popupState)} endIcon={<KeyboardArrowDownIcon />}>
+                <Button variant='contained' {...bindTrigger(popupState)} endIcon={<KeyboardArrowDownIcon />} sx={{...button_style_span, mt: 1}}>
                   {classes[currentClass].name}
                 </Button>
                 <Menu {...bindMenu(popupState)}>
@@ -547,15 +552,15 @@ function App() {
             items={classes} 
             onChange={handleColorUpdate} 
           />
-          <Button variant='contained' component='label' onClick={clearAnnotations} color={'warning'}>
+          <Button variant='contained' component='label' onClick={clearAnnotations} color={'warning'} sx={{...button_style_span}}>
             Clear Annotations
           </Button>
-          <Button variant='contained' component='label' onClick={exportAnnotations}>
+          <Button variant='contained' component='label' onClick={exportAnnotations} sx={{...button_style_span}}>
             Export Annotations
           </Button>
-          <Button variant='contained' component='label'>
+          <Button variant='contained' component='label' sx={{...button_style_span}}>
             Import Annotations
-            <input hidden type='file' accept='txt' onChange={importAnnotations} />
+            <input hidden type='file' accept='txt' onChange={importAnnotations}/>
           </Button>
         </Box>
 			),
@@ -567,7 +572,7 @@ function App() {
           <PopupState variant='popover' popupId='model-popup-menu'>
             {(popupState) => (
               <Fragment>
-                <Button variant='contained' {...bindTrigger(popupState)} endIcon={<KeyboardArrowDownIcon />}>
+                <Button variant='contained' {...bindTrigger(popupState)} endIcon={<KeyboardArrowDownIcon />} sx={{...button_style_span, mt: 1}}>
                   {models[currentModel]}
                 </Button>
                 <Menu {...bindMenu(popupState)}>
@@ -583,9 +588,15 @@ function App() {
               </Fragment>
             )}
           </PopupState>
-          <Button variant='contained' component='label' onClick={handleOpenCustomUploadModal}>Load Custom</Button>
-          <Typography>Selected: {lastCustomModelName}</Typography>
-          <Typography>Type: {lastCustomModelType}</Typography>
+          <Button variant='contained' component='label' onClick={handleOpenCustomUploadModal} sx={{...button_style_span}}>
+            Load Custom
+          </Button>
+          <Typography gutterBottom variant="body2" sx={{ fontWeight: 'bold' }}>
+            Selected Model: {lastCustomModelName}
+          </Typography>
+          <Typography gutterBottom variant="body2" sx={{ fontWeight: 'bold' }}>
+            Model Type: {lastCustomModelType}
+          </Typography>
           <Modal
             open={customUploadModalOpen}
             onClose={cancelCustom}
@@ -620,38 +631,52 @@ function App() {
               <Button onClick={cancelCustom}>Cancel</Button>
             </Box>
           </Modal>
-          <TextField
-            value={threshold}
-            onChange={(e) => setThreshold(Number(e.target.value))}
-            type='number'
-            variant='outlined'
-            size='small'
-            slotProps={{ 
-              htmlInput: {
-                step: 0.1,
-                min: 0,
-                max: 1
-              }
-            }}
-          />
-          <TextField
-            value={cellDiameter}
-            onChange={(e) => setCellDiameter(Number(e.target.value))}
-            type='number'
-            variant='outlined'
-            size='small'
-            slotProps={{ 
-              htmlInput: {
-                step: 1,
-                min: 0
-              }
-            }}
-          />
+          <Box display='flex' flexDirection='row' sx={{pt: 1, borderTop: 1, borderColor: 'grey.500'}}>
+            <Box sx={{width: '50%', display: 'flex', flexDirection: 'column'}}>
+              <Typography gutterBottom variant="body2" sx={{ fontWeight: 'bold' }}>
+                Threshold
+              </Typography>
+              <TextField
+                value={threshold}
+                onChange={(e) => setThreshold(Number(e.target.value))}
+                type='number'
+                variant='outlined'
+                size='small'
+                slotProps={{ 
+                  htmlInput: {
+                    step: 0.1,
+                    min: 0,
+                    max: 1
+                  }
+                }}
+                sx={{...button_style_span, mr: 1, mt: 'auto'}}
+              />
+            </Box>
+            <Box  sx={{width: '50%', display: 'flex', flexDirection: 'column'}}>
+              <Typography gutterBottom variant="body2" sx={{ fontWeight: 'bold', ml: 1 }}>
+                Average Cell Diameter
+              </Typography>
+              <TextField
+                value={cellDiameter}
+                onChange={(e) => setCellDiameter(Number(e.target.value))}
+                type='number'
+                variant='outlined'
+                size='small'
+                slotProps={{ 
+                  htmlInput: {
+                    step: 1,
+                    min: 0
+                  },
+                }}
+                sx={{...button_style_span, ml: 1, mt: 'auto'}}
+              />
+            </Box>
+          </Box>
           <Box display='flex' flexDirection='row'>
-            <Button variant='contained' component='label' onClick={detect}>
+            <Button variant='contained' component='label' onClick={detect} sx={{...button_style_span, mr: 1}}>
               Single Detect
             </Button>
-            <Button variant='contained' component='label' onClick={handleOpenBatchModal}>
+            <Button variant='contained' component='label' onClick={handleOpenBatchModal} sx={{...button_style_span, ml: 1}}>
               Batch Detect
             </Button>
             <Modal
@@ -689,6 +714,15 @@ function App() {
               </Box>
             </Modal>
           </Box>
+          <Button variant='contained' component='label' onClick={console.log('click!')} sx={{...button_style_span}}>
+            Save Training Data
+          </Button>
+          <Button variant='contained' component='label' onClick={console.log('click!')} sx={{...button_style_span}}>
+            Fine Tune
+          </Button>
+          <Button variant='contained' component='label' onClick={console.log('click!')} sx={{...button_style_span}} color={'warning'}>
+            Clear Training Data
+          </Button>
         </Box>
       )
 		}
@@ -697,14 +731,14 @@ function App() {
   return (
     <Box sx={{ display: 'flex', height: '100vh', width: '100vw' }}>
       <SideMenu>
-        <Button variant='contained' component='label'>
+        <Button variant='contained' component='label' sx={{...button_style_span}}>
           Load Image
-          <input hidden type='file' accept='image/tiff' onChange={handleUpload} />
+          <input hidden type='file' accept='image/tiff' onChange={handleUpload}/>
         </Button>
-        <Button variant='contained' component='label' onClick={handleSave}>
+        <Button variant='contained' component='label' onClick={handleSave} sx={{...button_style_span}}>
           Save Image
         </Button>
-        <Button variant='contained' component='label' onClick={toggleCrop} color={isCropping ? 'secondary' : 'primary'}>
+        <Button variant='contained' component='label' onClick={toggleCrop} color={isCropping ? 'secondary' : 'primary'} sx={{...button_style_span}}>
           Crop Image
         </Button>
 
@@ -712,7 +746,7 @@ function App() {
           <AdjustableSlider
             label='Brightness'
             value={brightness}
-            onChange={(val) => setBrightness(val)}
+            onChange={(e, val) => setBrightness(val)}
             min={bMin}
             setMin={setBMin}
             max={bMax}
@@ -721,7 +755,7 @@ function App() {
           <AdjustableSlider
             label='Contrast'
             value={contrast}
-            onChange={(val) => setContrast(val)}
+            onChange={(e, val) => setContrast(val)}
             min={cMin}
             setMin={setCMin}
             max={cMax}

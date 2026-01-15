@@ -7,7 +7,7 @@ const ColorMenu = ({ items, onChange, label = "Class Colors" }) => {
 
   return (
     <>
-      <Button variant="contained" {...bindTrigger(popupState)}>
+      <Button variant="contained" {...bindTrigger(popupState)} sx={{width: '100%', mb: 1}}>
         {label}
       </Button>
 
