@@ -40,11 +40,12 @@ function App() {
   ])
   const [currentClass, setCurrentClass] = useState(0)
 
-  // State for model detection
+  // State for model selection and detection settings
   const [models] = useState(['SGN', 'CD3', 'MADM', 'Custom'])
   const [currentModel, setCurrentModel] = useState(0)
   const [threshold, setThreshold] = useState(.5)
   const [cellDiameter, setCellDiameter] = useState(34)
+  // State for custom model upload
   const [customModel, setCustomModel] = useState()
   const [modelTypes] = useState(['SGN', 'CD3', 'MADM'])
   const [customModelType, setCustomModelType] = useState('')
@@ -52,9 +53,11 @@ function App() {
   const [lastCustomModel, setLastCustomModel] = useState()
   const [lastCustomModelType, setLastCustomModelType] = useState('')
   const [lastCustomModelName, setLastCustomModelName] = useState('')
-
   // State for batch detection
   const [selectedFiles, setSelectedFiles] = useState([])
+  // State for fine tuning
+  const [fineTuneModels] = useState(['SGN', 'MADM'])
+  const [currentFineTuneModel, setCurrenFineTuneModle] = useState(0)
 
   
   // *----------* Image Operations *----------* \\
@@ -200,6 +203,9 @@ function App() {
   }
 
   function clearAnnotations() {
+    const confirm = window.confirm('Are you sure you want to delete all annotations? This cannot be undone!')
+      if (!confirm) return
+    
     setAnnotations([])
   }
 
@@ -222,21 +228,18 @@ function App() {
       headers: {
         'Content-Type': 'application/json',
       },
-      // 'include' is the fetch equivalent of axios 'withCredentials: true'
       credentials: 'include', 
       body: JSON.stringify({
         yolo_data: yoloData,
         original_filename: filename,
       }),
     })
-      .then(async (response) => {
-        // Fetch does not throw on HTTP errors automatically
-        if (!response.ok) {
-          // Try to parse JSON error response, fallback to generic status text
-          const errorData = await response.json().catch(() => ({}))
-          throw new Error(errorData.error || `HTTP error! status: ${response.status}`)
+      .then(async (res) => {
+        if (!res.ok) {
+          const errorData = await res.json().catch(() => ({}))
+          throw new Error(errorData.error || `HTTP error! status: ${res.status}`)
         }
-        return response.blob() // Convert the response stream to a Blob
+        return res.blob() // Convert the response stream to a Blob
       })
       .then((blob) => {
         // Ensure the blob has the correct type
@@ -407,14 +410,6 @@ function App() {
     formData.append('threshold', threshold)
     formData.append('cell_diameter', cellDiameter)
     selectedFiles.forEach(file => formData.append('images', file));
-    // TODO: Add custom model batch detect
-    // if (detectionType === 'custom') {
-    //   const model = document.getElementById('custom-model').files[0];
-    //   if (!model) return alert('Please select a model!');
-        
-    //   formData.append('custom_model', model);
-    //   formData.append('model_type', document.getElementById('batch-model-type').value);
-    // }
     try {
       const res = await fetch('/batch-detect', {
         method: 'POST',
@@ -485,25 +480,105 @@ function App() {
     handleCloseCustomUploadModal()
   }
 
+  function saveTrainingData() {
+    // Normalize annotations
+    const normalizedAnnotations = annotations.map(ann => {
+      const x_center = parseFloat(((ann.x + ann.w / 2) / imageSize.width).toFixed(6));
+      const y_center = parseFloat(((ann.y + ann.h / 2) / imageSize.height).toFixed(6));
+      const width_norm = parseFloat((ann.w / imageSize.width).toFixed(6));
+      const height_norm = parseFloat((ann.h / imageSize.height).toFixed(6));
+      let class_name = classes[ann.class].name
+      if (ann.class !== 0 && ann.class !== 7) {
+        class_name = class_name.toLowerCase()
+      }
+      console.log(class_name)
+      return {
+        x_center,
+        y_center,
+        width_norm,
+        height_norm,
+        class_name 
+      }
+    })
+    
+    fetch('/save-training-data', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      credentials: 'include', 
+      body: JSON.stringify({
+        original_filename: imageName,
+        annotations: normalizedAnnotations,
+        brightness: brightness,
+        contrast: contrast,
+      }),
+    })
+    .then(async (res) => {
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}))
+        throw new Error(errorData.error || `HTTP error! status: ${res.status}`)
+      }
+    })
+    .then(alert('Training data saved!'))
+  }
+
+  function fineTune() {
+
+  }
+
+  function clearTrainingData() {
+    const confirm = window.confirm('Are you sure you want to delete all training data? This cannot be undone!')
+      if (!confirm) return
+
+    fetch('/clear-training-data', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      credentials: 'include', 
+    })
+    .then(async (res) => {
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}))
+        throw new Error(errorData.error || `HTTP error! status: ${res.status}`)
+      }
+    })
+    .then(alert('All training data has been cleared!'))
+  }
+
   // *----------* Tab Menu Contents *----------* \\
 
   // Batch detect modal state
   const [batchModalOpen, setBatchModalOpen] = useState(false);
   const handleOpenBatchModal = () => {
-    setBatchModalOpen(true);
-  };
+    setBatchModalOpen(true)
+  }
   const handleCloseBatchModal = () => {
-    setBatchModalOpen(false);
-  };
+    setBatchModalOpen(false)
+  }
 
   // Custom model upload modal state
   const [customUploadModalOpen, setCustomUploadModalOpen] = useState(false);
   const handleOpenCustomUploadModal = () => {
-    setCustomUploadModalOpen(true);
-  };
+    setCustomUploadModalOpen(true)
+  }
   const handleCloseCustomUploadModal = () => {
-    setCustomUploadModalOpen(false);
-  };
+    setCustomUploadModalOpen(false)
+  }
+
+  // Custom model upload modal state
+  const [fineTuneModalOpen, setFineTuneModalOpen] = useState(false);
+  const handleOpenFineTuneModal = () => {
+    setFineTuneModalOpen(true)
+  }
+  const handleCloseFineTuneModal = () => {
+    setFineTuneModalOpen(false)
+  }
+
+  function boxLog() {
+    console.log(annotations)
+  }
 
   const modal_style = {
     position: 'absolute',
@@ -529,6 +604,9 @@ function App() {
 			label: 'Annotate',
 			content: (
         <Box>
+          <Typography variant='body1' sx={{ pt: 1, fontWeight: 'bold' }}>
+            Annotate Image
+          </Typography>
           <PopupState variant='popover' popupId='class-popup-menu'>
             {(popupState) => (
               <Fragment>
@@ -552,16 +630,49 @@ function App() {
             items={classes} 
             onChange={handleColorUpdate} 
           />
-          <Button variant='contained' component='label' onClick={clearAnnotations} color={'warning'} sx={{...button_style_span}}>
-            Clear Annotations
-          </Button>
-          <Button variant='contained' component='label' onClick={exportAnnotations} sx={{...button_style_span}}>
-            Export Annotations
-          </Button>
-          <Button variant='contained' component='label' sx={{...button_style_span}}>
-            Import Annotations
-            <input hidden type='file' accept='txt' onChange={importAnnotations}/>
-          </Button>
+          <Box sx={{pt: 1, borderTop: 1, borderColor: 'grey.500'}}>
+            <Typography gutterBottom variant='body1' sx={{ fontWeight: 'bold' }}>
+              Manage Annotations
+            </Typography>
+            <Button variant='contained' component='label' onClick={exportAnnotations} sx={{...button_style_span}}>
+              Export Annotations
+            </Button>
+            <Button variant='contained' component='label' sx={{...button_style_span}}>
+              Import Annotations
+              <input hidden type='file' accept='txt' onChange={importAnnotations}/>
+            </Button>
+            <Button variant='contained' component='label' onClick={clearAnnotations} color={'warning'} sx={{...button_style_span}}>
+              Clear Annotations
+            </Button>
+            <Typography gutterBottom variant='body2' sx={{ fontWeight: 'bold' }}>
+              Current Cells: {annotations.length}
+            </Typography>
+          </Box>
+          <Box sx={{pt: 1, borderTop: 1, borderColor: 'grey.500'}}>
+            <Typography gutterBottom variant='body1' sx={{ fontWeight: 'bold' }}>
+              Train / Fine Tune
+            </Typography>
+            <Button variant='contained' component='label' onClick={saveTrainingData} sx={{...button_style_span}}>
+              Save Training Data
+            </Button>
+            <Button variant='contained' component='label' onClick={clearTrainingData} sx={{...button_style_span}} color={'warning'}>
+              Clear Training Data
+            </Button>
+            <Button variant='contained' component='label' onClick={handleOpenFineTuneModal} sx={{...button_style_span}}>
+              Fine Tune
+            </Button>
+            <Modal
+              open={fineTuneModalOpen}
+              onClose={handleCloseFineTuneModal}
+            >
+              <Box sx={{...modal_style}}>
+                <Typography>kimi wa zurui hito da mon</Typography>
+              </Box>
+            </Modal>
+            <Button variant='contained' component='label' sx={{...button_style_span}}>
+              Training Metrics
+            </Button>
+          </Box>
         </Box>
 			),
 		},
@@ -569,6 +680,9 @@ function App() {
 			label: 'Detect',
 			content: (
         <Box>
+          <Typography variant='body1' sx={{ pt: 1, fontWeight: 'bold' }}>
+            Select Model
+          </Typography>
           <PopupState variant='popover' popupId='model-popup-menu'>
             {(popupState) => (
               <Fragment>
@@ -591,10 +705,10 @@ function App() {
           <Button variant='contained' component='label' onClick={handleOpenCustomUploadModal} sx={{...button_style_span}}>
             Load Custom
           </Button>
-          <Typography gutterBottom variant="body2" sx={{ fontWeight: 'bold' }}>
+          <Typography gutterBottom variant='body2' sx={{ fontWeight: 'bold' }}>
             Selected Model: {lastCustomModelName}
           </Typography>
-          <Typography gutterBottom variant="body2" sx={{ fontWeight: 'bold' }}>
+          <Typography gutterBottom variant='body2' sx={{ fontWeight: 'bold' }}>
             Model Type: {lastCustomModelType}
           </Typography>
           <Modal
@@ -631,45 +745,50 @@ function App() {
               <Button onClick={cancelCustom}>Cancel</Button>
             </Box>
           </Modal>
-          <Box display='flex' flexDirection='row' sx={{pt: 1, borderTop: 1, borderColor: 'grey.500'}}>
-            <Box sx={{width: '50%', display: 'flex', flexDirection: 'column'}}>
-              <Typography gutterBottom variant="body2" sx={{ fontWeight: 'bold' }}>
-                Threshold
-              </Typography>
-              <TextField
-                value={threshold}
-                onChange={(e) => setThreshold(Number(e.target.value))}
-                type='number'
-                variant='outlined'
-                size='small'
-                slotProps={{ 
-                  htmlInput: {
-                    step: 0.1,
-                    min: 0,
-                    max: 1
-                  }
-                }}
-                sx={{...button_style_span, mr: 1, mt: 'auto'}}
-              />
-            </Box>
-            <Box  sx={{width: '50%', display: 'flex', flexDirection: 'column'}}>
-              <Typography gutterBottom variant="body2" sx={{ fontWeight: 'bold', ml: 1 }}>
-                Average Cell Diameter
-              </Typography>
-              <TextField
-                value={cellDiameter}
-                onChange={(e) => setCellDiameter(Number(e.target.value))}
-                type='number'
-                variant='outlined'
-                size='small'
-                slotProps={{ 
-                  htmlInput: {
-                    step: 1,
-                    min: 0
-                  },
-                }}
-                sx={{...button_style_span, ml: 1, mt: 'auto'}}
-              />
+          <Box sx={{pt: 1, borderTop: 1, borderColor: 'grey.500'}}>
+            <Typography gutterBottom variant='body1' sx={{ fontWeight: 'bold' }}>
+              Detection Settings
+            </Typography>
+            <Box display='flex' flexDirection='row'>
+              <Box sx={{width: '50%', display: 'flex', flexDirection: 'column', mr: 1}}>
+                <TextField
+                  value={threshold}
+                  onChange={(e) => setThreshold(Number(e.target.value))}
+                  type='number'
+                  variant='outlined'
+                  size='small'
+                  slotProps={{ 
+                    htmlInput: {
+                      step: 0.1,
+                      min: 0,
+                      max: 1
+                    }
+                  }}
+                  sx={{...button_style_span, mt: 'auto', mb: 0}}
+                />
+                <Typography gutterBottom variant='body2' sx={{ fontWeight: 'bold' }}>
+                  Threshold <br /> (0-1)
+                </Typography>
+              </Box>
+              <Box  sx={{width: '50%', display: 'flex', flexDirection: 'column', ml: 1}}>
+                <TextField
+                  value={cellDiameter}
+                  onChange={(e) => setCellDiameter(Number(e.target.value))}
+                  type='number'
+                  variant='outlined'
+                  size='small'
+                  slotProps={{ 
+                    htmlInput: {
+                      step: 1,
+                      min: 0
+                    },
+                  }}
+                  sx={{...button_style_span, mt: 'auto', mb: 0}}
+                />
+                <Typography gutterBottom variant='body2' sx={{ fontWeight: 'bold' }}>
+                  Average Cell Diameter
+                </Typography>
+              </Box>
             </Box>
           </Box>
           <Box display='flex' flexDirection='row'>
@@ -714,15 +833,33 @@ function App() {
               </Box>
             </Modal>
           </Box>
-          <Button variant='contained' component='label' onClick={console.log('click!')} sx={{...button_style_span}}>
-            Save Training Data
-          </Button>
-          <Button variant='contained' component='label' onClick={console.log('click!')} sx={{...button_style_span}}>
-            Fine Tune
-          </Button>
-          <Button variant='contained' component='label' onClick={console.log('click!')} sx={{...button_style_span}} color={'warning'}>
-            Clear Training Data
-          </Button>
+          <Box sx={{pt: 1, borderTop: 1, borderColor: 'grey.500'}}>
+            <Typography variant='body1' sx={{ fontWeight: 'bold' }}>
+              Fine Tuned Detection
+            </Typography>
+            <PopupState variant='popover' popupId='model-popup-menu'>
+              {(popupState) => (
+                <Fragment>
+                  <Button variant='contained' {...bindTrigger(popupState)} endIcon={<KeyboardArrowDownIcon />} sx={{...button_style_span, mt: 1}}>
+                    {fineTuneModels[currentFineTuneModel]}
+                  </Button>
+                  <Menu {...bindMenu(popupState)}>
+                    {fineTuneModels.map((item, index) => (
+                      <MenuItem 
+                        key={index}
+                        onClick={() => {setCurrenFineTuneModle(index)}}
+                      >
+                          <Typography variant='body1'>{item}</Typography>
+                      </MenuItem>
+                    ))}
+                  </Menu>
+                </Fragment>
+              )}
+            </PopupState>
+            <Button variant='contained' component='label' onClick={console.log('detecting fine tuned')} sx={{...button_style_span}}>
+              Fine Tuned Detect
+            </Button>
+          </Box>
         </Box>
       )
 		}
