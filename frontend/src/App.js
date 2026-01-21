@@ -641,7 +641,7 @@ function App() {
               Import Annotations
               <input hidden type='file' accept='txt' onChange={importAnnotations}/>
             </Button>
-            <Button variant='contained' component='label' onClick={clearAnnotations} color={'warning'} sx={{...button_style_span}}>
+            <Button variant='contained' component='label' onClick={clearAnnotations} sx={{...button_style_span, bgcolor: 'error.dark'}}>
               Clear Annotations
             </Button>
             <Typography gutterBottom variant='body2' sx={{ fontWeight: 'bold' }}>
@@ -655,7 +655,7 @@ function App() {
             <Button variant='contained' component='label' onClick={saveTrainingData} sx={{...button_style_span}}>
               Save Training Data
             </Button>
-            <Button variant='contained' component='label' onClick={clearTrainingData} sx={{...button_style_span}} color={'warning'}>
+            <Button variant='contained' component='label' onClick={clearTrainingData} sx={{...button_style_span, bgcolor: 'error.dark'}}>
               Clear Training Data
             </Button>
             <Button variant='contained' component='label' onClick={handleOpenFineTuneModal} sx={{...button_style_span}}>
@@ -875,7 +875,7 @@ function App() {
         <Button variant='contained' component='label' onClick={handleSave} sx={{...button_style_span}}>
           Save Image
         </Button>
-        <Button variant='contained' component='label' onClick={toggleCrop} color={isCropping ? 'secondary' : 'primary'} sx={{...button_style_span}}>
+        <Button variant='contained' component='label' onClick={toggleCrop}  sx={{...button_style_span, bgcolor: isCropping ? 'primary.light' : 'primary.main',}}>
           Crop Image
         </Button>
 
