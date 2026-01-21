@@ -196,22 +196,21 @@ export default function ImageCanvas({ src, boxes, onAddBox, onRemoveBox, isCropp
   }
 
   const handleWheel = (e) => {
+    e.preventDefault()
+    
     const delta = e.deltaY < 0 ? 1.1 : 0.9
 
-    const mouseX = e.clientX - canvasRef.current.getBoundingClientRect().left
-    const mouseY = e.clientY - canvasRef.current.getBoundingClientRect().top
+    const rect = canvasRef.current.getBoundingClientRect()
+    const mouseX = e.clientX - rect.left
+    const mouseY = e.clientY - rect.top
 
-    const before = screenToImage(mouseX, mouseY)
+    const newScale = scale * delta;
 
-    setScale((s) => s * delta)
+    const newOffsetX = mouseX - (mouseX - offset.x) * delta
+    const newOffsetY = mouseY - (mouseY - offset.y) * delta
 
-    // adjust offset so zoom centers around cursor
-    const after = screenToImage(mouseX, mouseY)
-
-    setOffset((o) => ({
-      x: o.x + (after.x - before.x) * scale,
-      y: o.y + (after.y - before.y) * scale,
-    }))
+    setScale(newScale);
+    setOffset({ x: newOffsetX, y: newOffsetY })
   }
 
   return (

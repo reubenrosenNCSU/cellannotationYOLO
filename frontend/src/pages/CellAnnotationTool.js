@@ -868,6 +868,9 @@ export default function CellAnnotationTool() {
   return (
     <Box sx={{ display: 'flex', height: '100vh', width: '100vw' }}>
       <SideMenu>
+        <Typography gutterBottom variant='h6' fontWeight={'bold'}>
+            Cell Annotation Tool (CAT🐱)
+        </Typography>
         <Button variant='contained' component='label' sx={{...button_style_span}}>
           Load Image
           <input hidden type='file' accept='image/tiff' onChange={handleUpload}/>
