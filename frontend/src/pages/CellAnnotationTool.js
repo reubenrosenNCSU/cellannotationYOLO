@@ -322,6 +322,8 @@ export default function CellAnnotationTool() {
     const formData = new FormData()
 
     let endpoint = ''
+    let payload = null
+    let headers = {}
 
     if (currentModel === 0) {
       endpoint = '/detect-sgn'
@@ -337,17 +339,28 @@ export default function CellAnnotationTool() {
       endpoint = '/detect-custom'
       formData.append('pt_file', customModel)
       formData.append('model_type', customModelType)
+      formData.append('threshold', threshold)
+
+      payload = formData
     } else {
       console.log('Invalid Model Selection')
       return
     }
 
-    formData.append('threshold', threshold)
+    if (!payload) {
+      payload = JSON.stringify({
+        threshold: threshold
+      })
 
+      headers['Content-Type'] = 'application/json'
+    }
+
+    
     try {
       const res = await fetch(endpoint, {
         method: 'POST',
-        body: formData,
+        headers: headers,
+        body: payload,
         credentials: 'include',
       })
       console.log(res)
