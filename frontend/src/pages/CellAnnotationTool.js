@@ -6,6 +6,7 @@ import Menu from '@mui/material/Menu'
 import MenuItem from '@mui/material/MenuItem'
 import Stack from '@mui/material/Stack'
 import TextField from '@mui/material/TextField';
+import DownloadIcon from '@mui/icons-material/Download'
 
 import SideMenu from '../components/SideMenu'
 import ImageCanvas from '../components/ImageCanvas'
@@ -14,6 +15,9 @@ import ColorMenu from '../components/ColorMenu'
 import AdjustableSlider from '../components/AdjustableSlider'
 
 export default function CellAnnotationTool() {
+  // Base URL for the backend API
+  const API_BASE_URL = 'http://10.80.24.12:5001'
+
   // State for image operations
   const [imageURL, setImageURL] = useState('')
   const [imageName, setImageName] = useState('')
@@ -572,10 +576,17 @@ export default function CellAnnotationTool() {
         const errorData = await res.json().catch(() => ({}))
         throw new Error(errorData.error || `HTTP error! status: ${res.status}`)
       }
+
+      const resJson = await res.json()
+      console.log(resJson.kfold_results)
+      console.log(resJson.model_url)
+      setKFoldResults(resJson.kfold_results)
+      setFineTuneModelURL(API_BASE_URL + resJson.model_url)
     })
-    .then((res) => {
+    .then(() => {
       alert('Model fine tuned with saved data.');
-      console.log(res.data)
+      handleOpenFineTuneDownloadModal()
+      handleCloseFineTuneModal()
   })
   .catch((err) => {
       console.error(err);
@@ -639,6 +650,15 @@ export default function CellAnnotationTool() {
   }
   const handleCloseFineTuneDownloadModal = () => {
     setFineTuneDownloadModalOpen(false)
+  }
+
+  // Training metrics modal
+  const [trainingMetricsModalOpen, setTrainingMetricsModalOpen] = useState(false)
+  const handleOpenTrainingMetricsModal = () => {
+    setTrainingMetricsModalOpen(true)
+  }
+  const handleCloseTrainingMetricsModal = () => {
+    setTrainingMetricsModalOpen(false)
   }
 
   const modal_style = {
@@ -797,12 +817,37 @@ export default function CellAnnotationTool() {
               onClose={handleCloseFineTuneDownloadModal}
             >
               <Box sx={{...modal_style}}>
-
+                <Typography sx={{ whiteSpace: 'pre-wrap' }}>{kFoldResults}</Typography>
+                {fineTuneModelURL && (
+                  <Button 
+                    variant="contained" 
+                    color="primary"
+                    href={fineTuneModelURL}
+                    download // This passes the download attribute to the underlying <a> tag
+                    sx={{ mt: 2 }} // 'mt: 2' is MUI shorthand for marginTop: 16px
+                    startIcon={<DownloadIcon />} // Optional: adds a nice download icon
+                  >
+                    Download Trained Model (.pt)
+                  </Button>
+                )}
+                <Button onClick={handleCloseFineTuneDownloadModal}>
+                  Close
+                </Button>
               </Box>
             </Modal>
-            <Button variant='contained' component='label' sx={{...button_style_span}}>
+            <Button variant='contained' component='label' onClick={handleOpenTrainingMetricsModal} sx={{...button_style_span}}>
               Training Metrics
             </Button>
+            <Modal
+              open={trainingMetricsModalOpen}
+              onClose={handleCloseTrainingMetricsModal}
+            >
+              <Box sx={{...modal_style}}>
+                <Button onClick={handleCloseTrainingMetricsModal}>
+                  Close
+                </Button>
+              </Box>
+            </Modal>
           </Box>
         </Box>
 			),
@@ -987,7 +1032,7 @@ export default function CellAnnotationTool() {
                 </Fragment>
               )}
             </PopupState>
-            <Button variant='contained' component='label' onClick={console.log('detecting fine tuned')} sx={{...button_style_span}}>
+            <Button variant='contained' component='label' sx={{...button_style_span}}>
               Fine Tuned Detect
             </Button>
           </Box>
