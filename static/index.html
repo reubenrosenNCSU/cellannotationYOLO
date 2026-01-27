@@ -675,6 +675,8 @@ document.getElementById('show-metrics-btn').addEventListener('click', async () =
         const res = await axios.get('/events-data');
         const data = res.data;
 
+        console.log(data)
+
         // Create color palette for metrics
         const colors = [
             '#FF6384', '#36A2EB', '#FFCE56', '#4BC0C0', 

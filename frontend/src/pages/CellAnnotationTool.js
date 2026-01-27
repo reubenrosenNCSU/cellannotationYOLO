@@ -13,6 +13,7 @@ import ImageCanvas from '../components/ImageCanvas'
 import TabMenu from '../components/TabMenu'
 import ColorMenu from '../components/ColorMenu'
 import AdjustableSlider from '../components/AdjustableSlider'
+import MetricsChart from '../components/MetricsChart'
 
 export default function CellAnnotationTool() {
   // Base URL for the backend API
@@ -67,6 +68,7 @@ export default function CellAnnotationTool() {
   const [epochs, setEpochs] = useState(10)
   const [kFoldResults, setKFoldResults] = useState()
   const [fineTuneModelURL, setFineTuneModelURL] = useState()
+  const [metricsData, setMetricsData] = useState()
   
   // *----------* Image Operations *----------* \\
 
@@ -614,6 +616,22 @@ export default function CellAnnotationTool() {
     .then(alert('All training data has been cleared!'))
   }
 
+  function getMetrics() {
+    fetch('/events-data', {
+      method: 'GET'
+    })
+    .then(async (res) => {
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}))
+        throw new Error(errorData.error || `HTTP error! status: ${res.status}`)
+      }
+
+      const resJson = await res.json()
+      console.log(resJson)
+      setMetricsData(resJson)
+    })
+  }
+
   // *----------* Tab Menu Contents *----------* \\
 
   // Batch detect modal state
@@ -655,6 +673,7 @@ export default function CellAnnotationTool() {
   // Training metrics modal
   const [trainingMetricsModalOpen, setTrainingMetricsModalOpen] = useState(false)
   const handleOpenTrainingMetricsModal = () => {
+    getMetrics()
     setTrainingMetricsModalOpen(true)
   }
   const handleCloseTrainingMetricsModal = () => {
@@ -843,6 +862,11 @@ export default function CellAnnotationTool() {
               onClose={handleCloseTrainingMetricsModal}
             >
               <Box sx={{...modal_style}}>
+                {metricsData && Object.keys(metricsData).length > 0 ? (
+                  <MetricsChart data={metricsData} />
+                ) : (
+                  <Typography>No training metrics available yet.</Typography>
+                )}
                 <Button onClick={handleCloseTrainingMetricsModal}>
                   Close
                 </Button>
