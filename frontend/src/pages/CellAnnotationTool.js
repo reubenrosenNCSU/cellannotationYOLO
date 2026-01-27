@@ -57,8 +57,12 @@ export default function CellAnnotationTool() {
   const [selectedFiles, setSelectedFiles] = useState([])
   // State for fine tuning
   const [fineTuneModels] = useState(['SGN', 'MADM'])
-  const [currentFineTuneModel, setCurrenFineTuneModle] = useState(0)
-
+  const [currentFineTuneModel, setCurrentFineTuneModel] = useState(0)
+  const [preTrainImages, setPreTrainImages] = useState(0)
+  const [maxImages, setMaxImages] = useState(7)
+  const [epochs, setEpochs] = useState(10)
+  const [kFoldResults, setKFoldResults] = useState()
+  const [fineTuneModelURL, setFineTuneModelURL] = useState()
   
   // *----------* Image Operations *----------* \\
 
@@ -493,6 +497,8 @@ export default function CellAnnotationTool() {
     handleCloseCustomUploadModal()
   }
 
+  // *----------* Training Operations *----------* \\
+
   function saveTrainingData() {
     // Normalize annotations
     const normalizedAnnotations = annotations.map(ann => {
@@ -537,7 +543,44 @@ export default function CellAnnotationTool() {
   }
 
   function fineTune() {
+    if (!epochs || epochs < 1) {
+      alert('Please enter valid number of epochs!')
+      return
+    }
 
+    if (currentFineTuneModel === 0 && (preTrainImages > 7 || preTrainImages < 0)) {
+      alert('SGN pre-train images must be between 0 and 7')
+      return
+    }
+    if (currentFineTuneModel === 1 && (preTrainImages > 278 || preTrainImages < 0)) {
+      alert('MADM pre-train images must be between 0 and 278')
+      return
+    }
+
+    const formData = new FormData()
+    formData.append('model_type', fineTuneModels[currentFineTuneModel])
+    formData.append('epochs', epochs)
+    formData.append('num_images', preTrainImages)
+
+    fetch('/train-saved', {
+      method: 'POST',
+      credentials: 'include', 
+      body: formData
+    })
+    .then(async (res) => {
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}))
+        throw new Error(errorData.error || `HTTP error! status: ${res.status}`)
+      }
+    })
+    .then((res) => {
+      alert('Model fine tuned with saved data.');
+      console.log(res.data)
+  })
+  .catch((err) => {
+      console.error(err);
+      alert('Training failed');
+  });
   }
 
   function clearTrainingData() {
@@ -563,7 +606,7 @@ export default function CellAnnotationTool() {
   // *----------* Tab Menu Contents *----------* \\
 
   // Batch detect modal state
-  const [batchModalOpen, setBatchModalOpen] = useState(false);
+  const [batchModalOpen, setBatchModalOpen] = useState(false)
   const handleOpenBatchModal = () => {
     setBatchModalOpen(true)
   }
@@ -572,7 +615,7 @@ export default function CellAnnotationTool() {
   }
 
   // Custom model upload modal state
-  const [customUploadModalOpen, setCustomUploadModalOpen] = useState(false);
+  const [customUploadModalOpen, setCustomUploadModalOpen] = useState(false)
   const handleOpenCustomUploadModal = () => {
     setCustomUploadModalOpen(true)
   }
@@ -580,8 +623,8 @@ export default function CellAnnotationTool() {
     setCustomUploadModalOpen(false)
   }
 
-  // Custom model upload modal state
-  const [fineTuneModalOpen, setFineTuneModalOpen] = useState(false);
+  // Fine tuning modal state
+  const [fineTuneModalOpen, setFineTuneModalOpen] = useState(false)
   const handleOpenFineTuneModal = () => {
     setFineTuneModalOpen(true)
   }
@@ -589,8 +632,13 @@ export default function CellAnnotationTool() {
     setFineTuneModalOpen(false)
   }
 
-  function boxLog() {
-    console.log(annotations)
+  // Fine tune download modal state
+  const [fineTuneDownloadModalOpen, setFineTuneDownloadModalOpen] = useState(false)
+  const handleOpenFineTuneDownloadModal = () => {
+    setFineTuneDownloadModalOpen(true)
+  }
+  const handleCloseFineTuneDownloadModal = () => {
+    setFineTuneDownloadModalOpen(false)
   }
 
   const modal_style = {
@@ -679,7 +727,77 @@ export default function CellAnnotationTool() {
               onClose={handleCloseFineTuneModal}
             >
               <Box sx={{...modal_style}}>
-                <Typography>kimi wa zurui hito da mon</Typography>
+                <Typography>Train with Saved Data</Typography>
+                <Box display='flex' flexDirection='row'>
+                  <Box sx={{width: '50%', display: 'flex', flexDirection: 'column', mr: 1, mb: 'auto'}}>
+                    <TextField
+                      value={preTrainImages}
+                      onChange={(e) => setPreTrainImages(Number(e.target.value))}
+                      type='number'
+                      variant='outlined'
+                      size='small'
+                      slotProps={{ 
+                        htmlInput: {
+                          step: 1,
+                          min: 0,
+                          max: maxImages
+                        }
+                      }}
+                      sx={{...button_style_span}}
+                    />
+                    <Typography gutterBottom variant='body2' sx={{ fontWeight: 'bold' }}>
+                      Pre-train images (0-7 for SGN, 0-278 for MADM)
+                    </Typography>
+                  </Box>
+                  <Box sx={{width: '50%', display: 'flex', flexDirection: 'column', mr: 1, mb: 'auto'}}>
+                    <TextField
+                      value={epochs}
+                      onChange={(e) => setEpochs(Number(e.target.value))}
+                      type='number'
+                      variant='outlined'
+                      size='small'
+                      slotProps={{ 
+                        htmlInput: {
+                          step: 1,
+                          min: 0
+                        }
+                      }}
+                      sx={{...button_style_span}}
+                    />
+                    <Typography gutterBottom variant='body2' sx={{ fontWeight: 'bold' }}>
+                      Epochs
+                    </Typography>
+                  </Box>
+                </Box>
+                <PopupState variant='popover' popupId='model-popup-menu'>
+                  {(popupState) => (
+                    <Fragment>
+                      <Button variant='contained' {...bindTrigger(popupState)} endIcon={<KeyboardArrowDownIcon />} sx={{...button_style_span, mt: 1}}>
+                        {fineTuneModels[currentFineTuneModel]}
+                      </Button>
+                      <Menu {...bindMenu(popupState)}>
+                        {fineTuneModels.map((item, index) => (
+                          <MenuItem 
+                            key={index}
+                            onClick={() => {setCurrentFineTuneModel(index); if (index === 0) {setMaxImages(7)} else{setMaxImages(278)}}}
+                          >
+                              <Typography variant='body1'>{item}</Typography>
+                          </MenuItem>
+                        ))}
+                      </Menu>
+                    </Fragment>
+                  )}
+                </PopupState>
+                <Button onClick={fineTune}>Start Training</Button>
+                <Button onClick={handleCloseFineTuneModal}>Cancel</Button>
+              </Box>
+            </Modal>
+            <Modal
+              open={fineTuneDownloadModalOpen}
+              onClose={handleCloseFineTuneDownloadModal}
+            >
+              <Box sx={{...modal_style}}>
+
               </Box>
             </Modal>
             <Button variant='contained' component='label' sx={{...button_style_span}}>
@@ -860,7 +978,7 @@ export default function CellAnnotationTool() {
                     {fineTuneModels.map((item, index) => (
                       <MenuItem 
                         key={index}
-                        onClick={() => {setCurrenFineTuneModle(index)}}
+                        onClick={() => {setCurrentFineTuneModel(index)}}
                       >
                           <Typography variant='body1'>{item}</Typography>
                       </MenuItem>
