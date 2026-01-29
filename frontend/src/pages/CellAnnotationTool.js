@@ -244,34 +244,34 @@ export default function CellAnnotationTool() {
         original_filename: filename,
       }),
     })
-      .then(async (res) => {
-        if (!res.ok) {
-          const errorData = await res.json().catch(() => ({}))
-          throw new Error(errorData.error || `HTTP error! status: ${res.status}`)
-        }
-        return res.blob() // Convert the response stream to a Blob
-      })
-      .then((blob) => {
-        // Ensure the blob has the correct type
-        const zipBlob = new Blob([blob], { type: 'application/zip' })
-        
-        // Create download link
-        const downloadUrl = window.URL.createObjectURL(zipBlob)
-        const link = document.createElement('a')
+    .then(async (res) => {
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}))
+        throw new Error(errorData.error || `HTTP error! status: ${res.status}`)
+      }
+      return res.blob() // Convert the response stream to a Blob
+    })
+    .then((blob) => {
+      // Ensure the blob has the correct type
+      const zipBlob = new Blob([blob], { type: 'application/zip' })
+      
+      // Create download link
+      const downloadUrl = window.URL.createObjectURL(zipBlob)
+      const link = document.createElement('a')
 
-        link.href = downloadUrl
-        link.setAttribute('download', `${imageName}_export.zip`)
-        document.body.appendChild(link)
-        link.click()
+      link.href = downloadUrl
+      link.setAttribute('download', `${imageName}_export.zip`)
+      document.body.appendChild(link)
+      link.click()
 
-        // Cleanup
-        window.URL.revokeObjectURL(downloadUrl)
-        link.remove()
-      })
-      .catch((error) => {
-        console.error('Export error:', error)
-        alert(`Export failed: ${error.message}`)
-      })
+      // Cleanup
+      window.URL.revokeObjectURL(downloadUrl)
+      link.remove()
+    })
+    .catch((error) => {
+      console.error('Export error:', error)
+      alert(`Export failed: ${error.message}`)
+    })
   }
 
   function importAnnotations(e) {
@@ -503,6 +503,53 @@ export default function CellAnnotationTool() {
     handleCloseCustomUploadModal()
   }
 
+  async function handleFineTuneDetect() {
+    try {
+      const res = await fetch('/detect-finetuned', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        credentials: 'include', 
+        body: JSON.stringify({
+          model_type: fineTuneModels[currentFineTuneModel],
+          threshold: threshold
+        })
+      })
+
+      if (!res.ok) throw new Error(`${fineTuneModels[currentFineTuneModel]} detection failed`)
+
+      const data = await res.json()
+
+      const yoloTxt = data.annotations
+      const imgWidth = data.image_width
+      const imgHeight = data.image_height
+
+      setAnnotations([])
+      let importedCount = 0
+
+      yoloTxt.split('\n').forEach(line => {
+        if (!line.trim()) return
+        const [clsStr, cxStr, cyStr, wStr, hStr] = line.trim().split(' ')
+        const cls = parseInt(clsStr)
+        const cx = parseFloat(cxStr) * imgWidth
+        const cy = parseFloat(cyStr) * imgHeight
+        const w = parseFloat(wStr) * imgWidth
+        const h = parseFloat(hStr) * imgHeight
+        const x1 = cx - w / 2
+        const y1 = cy - h / 2
+
+        handleAddBox({x: x1, y: y1, w: w, h: h, class: cls}) //TODO add isDetected
+
+        importedCount++
+      })
+
+      alert(`Detected ${importedCount} ${models[currentModel]} objects!`)
+    } catch (e) {
+      alert('Fine tuned detection failed: ' + (e.response?.data?.error || e.message))
+    }
+  }
+
   // *----------* Training Operations *----------* \\
 
   function saveTrainingData() {
@@ -583,7 +630,7 @@ export default function CellAnnotationTool() {
       console.log(resJson.kfold_results)
       console.log(resJson.model_url)
       setKFoldResults(resJson.kfold_results)
-      setFineTuneModelURL(API_BASE_URL + resJson.model_url)
+      setFineTuneModelURL(resJson.model_url)
     })
     .then(() => {
       alert('Model fine tuned with saved data.');
@@ -614,6 +661,46 @@ export default function CellAnnotationTool() {
       }
     })
     .then(alert('All training data has been cleared!'))
+  }
+
+  const handleModelDownload = async () => {
+    try {
+      // 1. Prepare the URL
+      // If fineTuneModelURL is "/snapshots/my_model.pt", this prepends the backend host
+      const downloadUrl = fineTuneModelURL
+      console.log(downloadUrl)
+      const res = await fetch(downloadUrl, {
+        method: 'GET',
+        credentials: 'include', // ⚠️ CRITICAL: Must be here to send cookies/session!
+      })
+
+      if (!res.ok) {
+        throw new Error(`Download failed: ${res.statusText}`)
+      }
+
+      // 2. Convert response to Blob
+      const blob = await res.blob()
+      const url = window.URL.createObjectURL(blob)
+
+      // 3. Create invisible link and click
+      const a = document.createElement('a')
+      a.href = url
+      
+      // Extract filename from the URL path (e.g. "my_model.pt")
+      const filename = fineTuneModelURL.split('/').pop() || 'model.pt'
+      a.download = filename
+      
+      document.body.appendChild(a)
+      a.click()
+      
+      // 4. Cleanup
+      a.remove()
+      window.URL.revokeObjectURL(url)
+
+    } catch (error) {
+      console.error('Download error:', error)
+      alert('Failed to download model. Please try again.')
+    }
   }
 
   function getMetrics() {
@@ -841,8 +928,7 @@ export default function CellAnnotationTool() {
                   <Button 
                     variant="contained" 
                     color="primary"
-                    href={fineTuneModelURL}
-                    download // This passes the download attribute to the underlying <a> tag
+                    onClick={handleModelDownload}
                     sx={{ mt: 2 }} // 'mt: 2' is MUI shorthand for marginTop: 16px
                     startIcon={<DownloadIcon />} // Optional: adds a nice download icon
                   >
@@ -1056,7 +1142,7 @@ export default function CellAnnotationTool() {
                 </Fragment>
               )}
             </PopupState>
-            <Button variant='contained' component='label' sx={{...button_style_span}}>
+            <Button variant='contained' component='label' onClick={handleFineTuneDetect} sx={{...button_style_span}}>
               Fine Tuned Detect
             </Button>
           </Box>
