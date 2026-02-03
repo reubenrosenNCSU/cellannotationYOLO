@@ -66,6 +66,7 @@ export default function ImageCanvas({ src, boxes, onAddBox, onRemoveBox, isCropp
     // draw image
     ctx.drawImage(imgRef.current, 0, 0)
 
+    ctx.filter = 'none'
     // draw existing boxes
     ctx.lineWidth = 2 / scale // scale-independent line width
 
