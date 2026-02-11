@@ -1,12 +1,13 @@
-import { useState, Fragment } from 'react'
+import { useState, useEffect, Fragment } from 'react'
 import { Box, Button, Typography, Modal } from '@mui/material'
 import PopupState, { bindTrigger, bindMenu } from 'material-ui-popup-state'
 import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown'
 import Menu from '@mui/material/Menu'
 import MenuItem from '@mui/material/MenuItem'
 import Stack from '@mui/material/Stack'
-import TextField from '@mui/material/TextField';
+import TextField from '@mui/material/TextField'
 import DownloadIcon from '@mui/icons-material/Download'
+import Tooltip from '@mui/material/Tooltip'
 
 import SideMenu from '../components/SideMenu'
 import ImageCanvas from '../components/ImageCanvas'
@@ -50,6 +51,7 @@ export default function CellAnnotationTool() {
   const [currentModel, setCurrentModel] = useState(0)
   const [threshold, setThreshold] = useState(.5)
   const [cellDiameter, setCellDiameter] = useState(34)
+  const [detectedDiameter, setDetectedDiameter] = useState(0)
   // State for custom model upload
   const [customModel, setCustomModel] = useState()
   const [modelTypes] = useState(['SGN', 'CD3', 'MADM'])
@@ -69,6 +71,12 @@ export default function CellAnnotationTool() {
   const [kFoldResults, setKFoldResults] = useState()
   const [fineTuneModelURL, setFineTuneModelURL] = useState()
   const [metricsData, setMetricsData] = useState()
+
+  useEffect(() => {
+    if (annotations.length > 0) {
+      detectCellDiameter()
+    }
+  }, [annotations])
   
   // *----------* Image Operations *----------* \\
 
@@ -231,11 +239,13 @@ export default function CellAnnotationTool() {
     }
     if (imageURL) {
       setAnnotations(prev => [...prev, box])
+      //detectCellDiameter()
     }
   }
 
   const handleRemoveBox = (box) => {
     setAnnotations(prev => prev.filter(b => b !== box))
+    //detectCellDiameter()
   }
 
   const handleColorUpdate = (index, newColor) => {
@@ -359,6 +369,22 @@ export default function CellAnnotationTool() {
     }
 
     reader.readAsText(file)
+  }
+
+  function detectCellDiameter() {
+    // if (annotations.length == 0) {
+    //   setDetectedDiameter(0)
+    //   return
+    // }
+
+    let total = 0
+    annotations.forEach(ann => {
+      total += Math.sqrt(ann.w ** 2 + ann.h ** 2)
+    })
+
+    const avgDiameter = Math.round(total / annotations.length)
+    console.log(annotations.length)
+    setDetectedDiameter(avgDiameter)
   }
 
   // *----------* Detection Operations *----------* \\
@@ -1070,6 +1096,9 @@ export default function CellAnnotationTool() {
             <Typography gutterBottom variant='body1' sx={{ fontWeight: 'bold' }}>
               Detection Settings
             </Typography>
+            <Tooltip>
+              Detected Average Cell Diameter: {detectedDiameter}
+            </Tooltip>
             <Box display='flex' flexDirection='row'>
               <Box sx={{width: '50%', display: 'flex', flexDirection: 'column', mr: 1}}>
                 <TextField
