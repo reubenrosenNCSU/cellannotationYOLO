@@ -215,6 +215,7 @@ export default function CellAnnotationTool() {
         });
 
         setImageURL(data.converted_url)
+        setImageSize({width: box.width, height: box.height})
         
     } catch(e) {
       alert('Crop failed: ' + (e.response?.data?.error || e.message))
