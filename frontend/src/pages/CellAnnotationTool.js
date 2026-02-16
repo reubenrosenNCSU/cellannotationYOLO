@@ -412,6 +412,7 @@ export default function CellAnnotationTool() {
       formData.append('pt_file', customModel)
       formData.append('model_type', customModelType)
       formData.append('threshold', threshold)
+      formData.append('cell_diameter', cellDiameter)
 
       payload = formData
     } else {
@@ -421,7 +422,8 @@ export default function CellAnnotationTool() {
 
     if (!payload) {
       payload = JSON.stringify({
-        threshold: threshold
+        threshold: threshold,
+        cell_diameter: cellDiameter
       })
 
       headers['Content-Type'] = 'application/json'

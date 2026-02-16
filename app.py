@@ -29,6 +29,51 @@ import tifffile
 # Disable decompression bomb protection for large TIFF files
 Image.MAX_IMAGE_PIXELS = None
 
+def preprocess_image(image_path, upload_dir, detection_type, cell_diameter):
+    """
+    Standardizes any input image (TIFF/PNG/JPG) for the YOLO model.
+    Returns: (path_to_detection_image, det_w, det_h, scaling_factor)
+    """
+    # 1. Generate unique IDs to prevent race conditions
+    img_uuid = uuid.uuid4().hex[:8]
+    base_name = os.path.splitext(os.path.basename(image_path))[0]
+    
+    # 2. Normalize (Detection-only copy)
+    normalized_path = os.path.join(upload_dir, f"norm_{img_uuid}_{base_name}.png")
+    normalize_image(image_path, normalized_path)
+
+    # 3. Calculate Scaling
+    target_diameter = 20.0 if detection_type == 'CD3' else 34.0
+    scaling_factor = target_diameter / float(cell_diameter)
+    
+    with Image.open(normalized_path) as img:
+        orig_w, orig_h = img.size
+        
+    if scaling_factor != 1.0:
+        det_w = max(1, int(round(orig_w * scaling_factor)))
+        det_h = max(1, int(round(orig_h * scaling_factor)))
+        
+        scaled_path = os.path.join(upload_dir, f"scaled_{img_uuid}_{base_name}.png")
+        with Image.open(normalized_path) as img:
+            scaled_img = img.resize((det_w, det_h), Image.Resampling.LANCZOS)
+            scaled_img.save(scaled_path, format='PNG')
+        
+        # We can remove the intermediate normalized path to save space
+        if os.path.exists(normalized_path): os.remove(normalized_path)
+        return {
+            "path": scaled_path,
+            "det_w": det_w,
+            "det_h": det_h,
+            "scaling_factor": scaling_factor
+        }
+    
+    return {
+        "path": normalized_path,
+        "det_w": orig_w,
+        "det_h": orig_h,
+        "scaling_factor": scaling_factor
+    }
+
 def batch_process_image_yolo(user_id, image_path, detection_type, threshold, model_path=None, cell_diameter=34):
     """
     Minimal-safe batch processing:
@@ -438,7 +483,7 @@ def upload_cropped_file():
 from scripts.detect_tiles import detect_tiles_in_batch
 
 @app.route('/detect-sgn', methods=['POST'])
-def detect_sgn():
+def detect_sgn(threshold, cell_diameter=34):
     import json
 
     user_id = session['user_id']
@@ -654,13 +699,15 @@ def detect_madm():
 
     user_id = session['user_id']
     threshold = float(request.json.get('threshold', 0.5))
+    cell_diameter = float(request.json.get('cell_diameter', 34))
     upload_dir = os.path.join('users', user_id, 'uploads')
     tiles_dir = os.path.join('users', user_id, 'images', 'tiles')
     output_txt_dir = os.path.join('users', user_id, 'images', 'tiles_output')
     merged_output_path = os.path.join('users', user_id, 'finaloutput', 'merged_madm.txt')
-
+    print('setting directories')
     os.makedirs(tiles_dir, exist_ok=True)
     os.makedirs(output_txt_dir, exist_ok=True)
+    os.makedirs(os.path.dirname(merged_output_path), exist_ok=True)
 
     try:
         files = [f for f in os.listdir(upload_dir) if f.lower().endswith(('.tif', '.tiff', '.png', '.jpg', '.jpeg'))]
@@ -670,27 +717,37 @@ def detect_madm():
         image_path = os.path.join(upload_dir, files[0])
         model_path = 'snapshots/MADM_v3.pt'
 
+        print('prepping data')
+        prep_data = preprocess_image(
+            image_path, upload_dir, 'MADM', cell_diameter
+        )
+        print('data prepped')
+        print(prep_data)
         # Step 1: Split into tiles
-        subprocess.run(['python3', 'scripts/split_image.py', '--image', image_path, '--output', tiles_dir], check=True)
-
+        subprocess.run(['python3', 'scripts/split_image.py', '--image', prep_data['path'], '--output', tiles_dir], check=True)
+        print('image split successfully')
         # Step 2: Detect all tiles using GPU-efficient function
         detect_tiles_in_batch(tiles_dir, output_txt_dir, model_path, threshold)
 
         # Get image size from original
         with Image.open(image_path) as img:
             image_width, image_height = img.size
-
+        print('merging annotations')
         # Step 3: Merge annotations
         subprocess.run([
             'python3', 'scripts/merge_annotations.py',
             '--tiles', output_txt_dir,
             '--output', merged_output_path,
-            '--image_width', str(image_width),
-            '--image_height', str(image_height)
+            '--image_width', str(prep_data['det_w']),
+            '--image_height', str(prep_data['det_h'])
         ], check=True)
+        print('annotations merged')
 
         with open(merged_output_path, 'r') as f:
             final_annotation = f.read()
+        
+        if os.path.exists(prep_data['path']):
+            os.remove(prep_data['path'])
 
         return jsonify({
             "annotations": final_annotation,
