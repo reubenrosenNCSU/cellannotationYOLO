@@ -15,6 +15,7 @@ import TabMenu from '../components/TabMenu'
 import ColorMenu from '../components/ColorMenu'
 import AdjustableSlider from '../components/AdjustableSlider'
 import MetricsChart from '../components/MetricsChart'
+import CellCalibrator from '../components/CellCalibrator'
 
 export default function CellAnnotationTool() {
   // Base URL for the backend API
@@ -24,6 +25,7 @@ export default function CellAnnotationTool() {
   const [imageURL, setImageURL] = useState('')
   const [imageName, setImageName] = useState('')
   const [imageSize, setImageSize] = useState({width: 0, height: 0})
+  const [scale, setScale] = useState(1)
   const [isCropping, setIsCropping] = useState(false)
   const [brightness, setBrightness] = useState(0)
   const [bMin, setBMin] = useState(-100)
@@ -831,6 +833,9 @@ export default function CellAnnotationTool() {
     setTrainingMetricsModalOpen(false)
   }
 
+  // Calibrator
+  const [calibratorOpen, setCalibratorOpen] = useState(false)
+
   const modal_style = {
     position: 'absolute',
     top: '50%',
@@ -1102,6 +1107,9 @@ export default function CellAnnotationTool() {
             <Tooltip>
               Detected Average Cell Diameter: {detectedDiameter}
             </Tooltip>
+            <Button variant='contained' component='label' onClick={() => setCalibratorOpen(true)} sx={{...button_style_span}}>
+              Calibrate Cell Size
+            </Button>
             <Box display='flex' flexDirection='row'>
               <Box sx={{width: '50%', display: 'flex', flexDirection: 'column', mr: 1}}>
                 <TextField
@@ -1270,8 +1278,12 @@ export default function CellAnnotationTool() {
         <ImageCanvas src={imageURL} boxes={annotations} onAddBox={handleAddBox} 
           onRemoveBox={handleRemoveBox} isCropping={isCropping} onCrop={handleCrop}
           currentClass={currentClass} classes={classes} imageSize={imageSize}
-          brightness={brightness} contrast={contrast}/>
+          brightness={brightness} contrast={contrast}
+          scale={scale} onScaleChange={setScale}/>
       </Box>
+      {calibratorOpen && (
+        <CellCalibrator scale={scale} onClose={() => setCalibratorOpen(false)} />
+      )}
     </Box>
   )
 }

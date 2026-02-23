@@ -1,12 +1,11 @@
 import { useRef, useState, useEffect } from 'react'
 
 export default function ImageCanvas({ src, boxes, onAddBox, onRemoveBox, isCropping,
-    onCrop, currentClass, classes, imageSize, brightness, contrast }) {
+    onCrop, currentClass, classes, imageSize, brightness, contrast, scale, onScaleChange }) {
   const canvasRef = useRef(null)
   const imgRef = useRef(null)
 
   // pan + zoom state
-  const [scale, setScale] = useState(1)
   const [offset, setOffset] = useState({ x: 0, y: 0 })
   const [isPanning, setIsPanning] = useState(false)
   const [lastPan, setLastPan] = useState({ x: 0, y: 0 })
@@ -210,7 +209,7 @@ export default function ImageCanvas({ src, boxes, onAddBox, onRemoveBox, isCropp
     const newOffsetX = mouseX - (mouseX - offset.x) * delta
     const newOffsetY = mouseY - (mouseY - offset.y) * delta
 
-    setScale(newScale);
+    onScaleChange(newScale)
     setOffset({ x: newOffsetX, y: newOffsetY })
   }
 
