@@ -897,7 +897,7 @@ export default function CellAnnotationTool() {
               Import Annotations
               <input hidden type='file' accept='txt' onChange={importAnnotations}/>
             </Button>
-            <Button variant='contained' component='label' onClick={clearAnnotations} sx={{...button_style_span, bgcolor: 'error.dark'}}>
+            <Button variant='contained' component='label' onClick={clearAnnotations} sx={{...button_style_span, bgcolor: 'error.dark', '&:hover': { bgcolor: 'error.light' }}}>
               Clear Annotations
             </Button>
             <Typography gutterBottom variant='body2' sx={{ fontWeight: 'bold' }}>
@@ -911,7 +911,7 @@ export default function CellAnnotationTool() {
             <Button variant='contained' component='label' onClick={saveTrainingData} sx={{...button_style_span}}>
               Save Training Data
             </Button>
-            <Button variant='contained' component='label' onClick={clearTrainingData} sx={{...button_style_span, bgcolor: 'error.dark'}}>
+            <Button variant='contained' component='label' onClick={clearAnnotations} sx={{...button_style_span, bgcolor: 'error.dark', '&:hover': { bgcolor: 'error.light' }}}>
               Clear Training Data
             </Button>
             <Button variant='contained' component='label' onClick={handleOpenFineTuneModal} sx={{...button_style_span}}>
@@ -1239,7 +1239,7 @@ export default function CellAnnotationTool() {
         <Button variant='contained' component='label' onClick={handleSave} sx={{...button_style_span}}>
           Save Image
         </Button>
-        <Button variant='contained' component='label' onClick={toggleCrop}  sx={{...button_style_span, bgcolor: isCropping ? 'primary.light' : 'primary.main',}}>
+        <Button variant='contained' component='label' onClick={toggleCrop}  sx={{...button_style_span, bgcolor: isCropping ? 'primary.dark' : 'containedPrimary',}}>
           Crop Image
         </Button>
 
