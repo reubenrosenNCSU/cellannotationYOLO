@@ -482,112 +482,6 @@ def upload_cropped_file():
     
 from scripts.detect_tiles import detect_tiles_in_batch
 
-@app.route('/detect-sgn', methods=['POST'])
-def detect_sgn(threshold, cell_diameter=34):
-    import json
-
-    user_id = session['user_id']
-    threshold = float(request.json.get('threshold', 0.5))
-    upload_dir = os.path.join('users', user_id, 'uploads')
-    tiles_dir = os.path.join('users', user_id, 'images', 'tiles')
-    output_txt_dir = os.path.join('users', user_id, 'images', 'tiles_output')
-    merged_output_path = os.path.join('users', user_id, 'finaloutput', 'merged_sgn.txt')
-
-    os.makedirs(tiles_dir, exist_ok=True)
-    os.makedirs(output_txt_dir, exist_ok=True)
-
-    try:
-        files = [f for f in os.listdir(upload_dir) if f.lower().endswith(('.tif', '.tiff', '.png', '.jpg', '.jpeg'))]
-        if not files:
-            return jsonify({'error': 'No image found. Upload an image first.'}), 400
-
-        image_path = os.path.join(upload_dir, files[0])
-        model_path = 'snapshots/SGN_best.pt'
-
-        # Step 1: Split into tiles
-        subprocess.run(['python3', 'scripts/split_image.py', '--image', image_path, '--output', tiles_dir], check=True)
-
-        # Step 2: Detect all tiles using GPU-efficient function
-        detect_tiles_in_batch(tiles_dir, output_txt_dir, model_path, threshold)
-
-        # Get image size from original
-        with Image.open(image_path) as img:
-            image_width, image_height = img.size
-
-        # Step 3: Merge annotations
-        subprocess.run([
-            'python3', 'scripts/merge_annotations.py',
-            '--tiles', output_txt_dir,
-            '--output', merged_output_path,
-            '--image_width', str(image_width),
-            '--image_height', str(image_height)
-        ], check=True)
-
-        with open(merged_output_path, 'r') as f:
-            final_annotation = f.read()
-
-        return jsonify({
-            "annotations": final_annotation,
-            "image_width": image_width,
-            "image_height": image_height
-        })
-
-    except Exception as e:
-        return jsonify({'error': f'Detection failed: {str(e)}'}), 500
-
-@app.route('/detect-cd3', methods=['POST'])
-def detect_cd3():
-    user_id = session['user_id']
-    threshold = float(request.json.get('threshold', 0.5))
-    upload_dir = os.path.join('users', user_id, 'uploads')
-    tiles_dir = os.path.join('users', user_id, 'images', 'tiles')
-    output_txt_dir = os.path.join('users', user_id, 'images', 'tiles_output')
-    merged_output_path = os.path.join('users', user_id, 'finaloutput', 'merged_cd3.txt')
-
-    os.makedirs(tiles_dir, exist_ok=True)
-    os.makedirs(output_txt_dir, exist_ok=True)
-
-    try:
-        files = [f for f in os.listdir(upload_dir) if f.lower().endswith(('.tif', '.tiff', '.png', '.jpg', '.jpeg'))]
-        if not files:
-            return jsonify({'error': 'No image found. Upload an image first.'}), 400
-
-        image_path = os.path.join(upload_dir, files[0])
-        model_path = 'snapshots/cd3_v2.pt'  # Changed model path
-
-        # Split into tiles
-        subprocess.run(['python3', 'scripts/split_image.py', '--image', image_path, '--output', tiles_dir], check=True)
-
-        # Detect all tiles
-        detect_tiles_in_batch(tiles_dir, output_txt_dir, model_path, threshold)
-
-        # Get image size
-        with Image.open(image_path) as img:
-            image_width, image_height = img.size
-
-        # Merge annotations
-        subprocess.run([
-            'python3', 'scripts/merge_annotations.py',
-            '--tiles', output_txt_dir,
-            '--output', merged_output_path,
-            '--image_width', str(image_width),
-            '--image_height', str(image_height)
-        ], check=True)
-
-        with open(merged_output_path, 'r') as f:
-            final_annotation = f.read()
-
-        return jsonify({
-            "annotations": final_annotation,
-            "image_width": image_width,
-            "image_height": image_height
-        })
-
-    except Exception as e:
-        return jsonify({'error': f'CD3 detection failed: {str(e)}'}), 500
-
-
-
 
 @app.route('/converted/<filename>')
 def serve_converted(filename):
@@ -691,72 +585,7 @@ def clear_training_data():
     
     except Exception as e:
         return jsonify({'error': str(e)}), 500
-    
 
-# @app.route('/detect-madm', methods=['POST'])
-# def detect_madm():
-#     import json
-
-#     user_id = session['user_id']
-#     threshold = float(request.json.get('threshold', 0.5))
-#     cell_diameter = float(request.json.get('cell_diameter', 34))
-#     upload_dir = os.path.join('users', user_id, 'uploads')
-#     tiles_dir = os.path.join('users', user_id, 'images', 'tiles')
-#     output_txt_dir = os.path.join('users', user_id, 'images', 'tiles_output')
-#     merged_output_path = os.path.join('users', user_id, 'finaloutput', 'merged_madm.txt')
-#     print('setting directories')
-#     os.makedirs(tiles_dir, exist_ok=True)
-#     os.makedirs(output_txt_dir, exist_ok=True)
-#     os.makedirs(os.path.dirname(merged_output_path), exist_ok=True)
-
-#     try:
-#         files = [f for f in os.listdir(upload_dir) if f.lower().endswith(('.tif', '.tiff', '.png', '.jpg', '.jpeg'))]
-#         if not files:
-#             return jsonify({'error': 'No image found. Upload an image first.'}), 400
-
-#         image_path = os.path.join(upload_dir, files[0])
-#         model_path = 'snapshots/MADM_v3.pt'
-
-#         print('prepping data')
-#         prep_data = preprocess_image(
-#             image_path, upload_dir, 'MADM', cell_diameter
-#         )
-#         print('data prepped')
-#         print(prep_data)
-#         # Step 1: Split into tiles
-#         subprocess.run(['python3', 'scripts/split_image.py', '--image', prep_data['path'], '--output', tiles_dir], check=True)
-#         print('image split successfully')
-#         # Step 2: Detect all tiles using GPU-efficient function
-#         detect_tiles_in_batch(tiles_dir, output_txt_dir, model_path, threshold)
-
-#         # Get image size from original
-#         with Image.open(image_path) as img:
-#             image_width, image_height = img.size
-#         print('merging annotations')
-#         # Step 3: Merge annotations
-#         subprocess.run([
-#             'python3', 'scripts/merge_annotations.py',
-#             '--tiles', output_txt_dir,
-#             '--output', merged_output_path,
-#             '--image_width', str(prep_data['det_w']),
-#             '--image_height', str(prep_data['det_h'])
-#         ], check=True)
-#         print('annotations merged')
-
-#         with open(merged_output_path, 'r') as f:
-#             final_annotation = f.read()
-        
-#         if os.path.exists(prep_data['path']):
-#             os.remove(prep_data['path'])
-
-#         return jsonify({
-#             "annotations": final_annotation,
-#             "image_width": image_width,
-#             "image_height": image_height
-#         })
-
-#     except Exception as e:
-#         return jsonify({'error': f'Detection failed: {str(e)}'}), 500
 
 @app.route('/detect-madm', methods=['POST'])
 def detect_madm():
@@ -804,6 +633,192 @@ def detect_madm():
 
     except Exception as e:
         return jsonify({'error': f'Detection failed: {str(e)}'}), 500
+
+
+@app.route('/detect-sgn', methods=['POST'])
+def detect_sgn():
+    from scripts.sahi_detect import detect_to_yolo
+
+    user_id = session['user_id']
+    threshold = float(request.json.get('threshold', 0.5))
+    upload_dir = os.path.join('users', user_id, 'uploads')
+    merged_output_path = os.path.join('users', user_id, 'finaloutput', 'merged_sgn.txt')
+    os.makedirs(os.path.dirname(merged_output_path), exist_ok=True)
+
+    try:
+        files = [f for f in os.listdir(upload_dir) if f.lower().endswith(('.tif', '.tiff', '.png', '.jpg', '.jpeg'))]
+        if not files:
+            return jsonify({'error': 'No image found. Upload an image first.'}), 400
+
+        image_path = os.path.join(upload_dir, files[0])
+
+        with Image.open(image_path) as img:
+            image_width, image_height = img.size
+
+        final_annotation = detect_to_yolo(
+            image_path=image_path,
+            model_path='snapshots/SGN_best.pt',
+            image_width=image_width,
+            image_height=image_height,
+            threshold=threshold,
+        )
+
+        with open(merged_output_path, 'w') as f:
+            f.write(final_annotation)
+
+        return jsonify({
+            "annotations": final_annotation,
+            "image_width": image_width,
+            "image_height": image_height
+        })
+
+    except Exception as e:
+        return jsonify({'error': f'Detection failed: {str(e)}'}), 500
+
+
+@app.route('/detect-cd3', methods=['POST'])
+def detect_cd3():
+    from scripts.sahi_detect import detect_to_yolo
+
+    user_id = session['user_id']
+    threshold = float(request.json.get('threshold', 0.5))
+    upload_dir = os.path.join('users', user_id, 'uploads')
+    merged_output_path = os.path.join('users', user_id, 'finaloutput', 'merged_cd3.txt')
+    os.makedirs(os.path.dirname(merged_output_path), exist_ok=True)
+
+    try:
+        files = [f for f in os.listdir(upload_dir) if f.lower().endswith(('.tif', '.tiff', '.png', '.jpg', '.jpeg'))]
+        if not files:
+            return jsonify({'error': 'No image found. Upload an image first.'}), 400
+
+        image_path = os.path.join(upload_dir, files[0])
+
+        with Image.open(image_path) as img:
+            image_width, image_height = img.size
+
+        final_annotation = detect_to_yolo(
+            image_path=image_path,
+            model_path='snapshots/cd3_v2.pt',
+            image_width=image_width,
+            image_height=image_height,
+            threshold=threshold,
+        )
+
+        with open(merged_output_path, 'w') as f:
+            f.write(final_annotation)
+
+        return jsonify({
+            "annotations": final_annotation,
+            "image_width": image_width,
+            "image_height": image_height
+        })
+
+    except Exception as e:
+        return jsonify({'error': f'CD3 detection failed: {str(e)}'}), 500
+
+# @app.route('/detect-sgn', methods=['POST'])
+# def detect_sgn(threshold, cell_diameter=34):
+#     import json
+
+#     user_id = session['user_id']
+#     threshold = float(request.json.get('threshold', 0.5))
+#     upload_dir = os.path.join('users', user_id, 'uploads')
+#     tiles_dir = os.path.join('users', user_id, 'images', 'tiles')
+#     output_txt_dir = os.path.join('users', user_id, 'images', 'tiles_output')
+#     merged_output_path = os.path.join('users', user_id, 'finaloutput', 'merged_sgn.txt')
+
+#     os.makedirs(tiles_dir, exist_ok=True)
+#     os.makedirs(output_txt_dir, exist_ok=True)
+
+#     try:
+#         files = [f for f in os.listdir(upload_dir) if f.lower().endswith(('.tif', '.tiff', '.png', '.jpg', '.jpeg'))]
+#         if not files:
+#             return jsonify({'error': 'No image found. Upload an image first.'}), 400
+
+#         image_path = os.path.join(upload_dir, files[0])
+#         model_path = 'snapshots/SGN_best.pt'
+
+#         # Step 1: Split into tiles
+#         subprocess.run(['python3', 'scripts/split_image.py', '--image', image_path, '--output', tiles_dir], check=True)
+
+#         # Step 2: Detect all tiles using GPU-efficient function
+#         detect_tiles_in_batch(tiles_dir, output_txt_dir, model_path, threshold)
+
+#         # Get image size from original
+#         with Image.open(image_path) as img:
+#             image_width, image_height = img.size
+
+#         # Step 3: Merge annotations
+#         subprocess.run([
+#             'python3', 'scripts/merge_annotations.py',
+#             '--tiles', output_txt_dir,
+#             '--output', merged_output_path,
+#             '--image_width', str(image_width),
+#             '--image_height', str(image_height)
+#         ], check=True)
+
+#         with open(merged_output_path, 'r') as f:
+#             final_annotation = f.read()
+
+#         return jsonify({
+#             "annotations": final_annotation,
+#             "image_width": image_width,
+#             "image_height": image_height
+#         })
+
+#     except Exception as e:
+#         return jsonify({'error': f'Detection failed: {str(e)}'}), 500
+
+# @app.route('/detect-cd3', methods=['POST'])
+# def detect_cd3():
+#     user_id = session['user_id']
+#     threshold = float(request.json.get('threshold', 0.5))
+#     upload_dir = os.path.join('users', user_id, 'uploads')
+#     tiles_dir = os.path.join('users', user_id, 'images', 'tiles')
+#     output_txt_dir = os.path.join('users', user_id, 'images', 'tiles_output')
+#     merged_output_path = os.path.join('users', user_id, 'finaloutput', 'merged_cd3.txt')
+
+#     os.makedirs(tiles_dir, exist_ok=True)
+#     os.makedirs(output_txt_dir, exist_ok=True)
+
+#     try:
+#         files = [f for f in os.listdir(upload_dir) if f.lower().endswith(('.tif', '.tiff', '.png', '.jpg', '.jpeg'))]
+#         if not files:
+#             return jsonify({'error': 'No image found. Upload an image first.'}), 400
+
+#         image_path = os.path.join(upload_dir, files[0])
+#         model_path = 'snapshots/cd3_v2.pt'  # Changed model path
+
+#         # Split into tiles
+#         subprocess.run(['python3', 'scripts/split_image.py', '--image', image_path, '--output', tiles_dir], check=True)
+
+#         # Detect all tiles
+#         detect_tiles_in_batch(tiles_dir, output_txt_dir, model_path, threshold)
+
+#         # Get image size
+#         with Image.open(image_path) as img:
+#             image_width, image_height = img.size
+
+#         # Merge annotations
+#         subprocess.run([
+#             'python3', 'scripts/merge_annotations.py',
+#             '--tiles', output_txt_dir,
+#             '--output', merged_output_path,
+#             '--image_width', str(image_width),
+#             '--image_height', str(image_height)
+#         ], check=True)
+
+#         with open(merged_output_path, 'r') as f:
+#             final_annotation = f.read()
+
+#         return jsonify({
+#             "annotations": final_annotation,
+#             "image_width": image_width,
+#             "image_height": image_height
+#         })
+
+#     except Exception as e:
+#         return jsonify({'error': f'CD3 detection failed: {str(e)}'}), 500
 
 
 @app.route('/train-saved', methods=['POST'])
