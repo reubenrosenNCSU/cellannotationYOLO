@@ -911,7 +911,7 @@ export default function CellAnnotationTool() {
             <Button variant='contained' component='label' onClick={saveTrainingData} sx={{...button_style_span}}>
               Save Training Data
             </Button>
-            <Button variant='contained' component='label' onClick={clearAnnotations} sx={{...button_style_span, bgcolor: 'error.dark', '&:hover': { bgcolor: 'error.light' }}}>
+            <Button variant='contained' component='label' onClick={clearTrainingData} sx={{...button_style_span, bgcolor: 'error.dark', '&:hover': { bgcolor: 'error.light' }}}>
               Clear Training Data
             </Button>
             <Button variant='contained' component='label' onClick={handleOpenFineTuneModal} sx={{...button_style_span}}>
