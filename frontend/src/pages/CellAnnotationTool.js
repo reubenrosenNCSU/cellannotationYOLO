@@ -183,38 +183,38 @@ export default function CellAnnotationTool() {
         const data = await res.json()
 
         // --- REPOSITION ANNOTATIONS ---
-        setAnnotations((prevAnnotations) => {
-          return prevAnnotations
-            .map((anno) => {
-              // Shift coordinates relative to the crop origin
-              let newX = anno.x - box.x
-              let newY = anno.y - box.y
-              let newW = anno.w
-              let newH = anno.h
+        // setAnnotations((prevAnnotations) => {
+        //   return prevAnnotations
+        //     .map((anno) => {
+        //       // Shift coordinates relative to the crop origin
+        //       // let newX = anno.x - box.x
+        //       // let newY = anno.y - box.y
+        //       // let newW = anno.w
+        //       // let newH = anno.h
 
-              // Clamp Left/Top and adjust Width/Height
-              if (newX < 0) {
-                newW += newX // Reduce width by the amount it's off-screen
-                newX = 0
-              }
-              if (newY < 0) {
-                newH += newY // Reduce height by the amount it's off-screen
-                newY = 0
-              }
+        //       // // Clamp Left/Top and adjust Width/Height
+        //       // if (newX < 0) {
+        //       //   newW += newX // Reduce width by the amount it's off-screen
+        //       //   newX = 0
+        //       // }
+        //       // if (newY < 0) {
+        //       //   newH += newY // Reduce height by the amount it's off-screen
+        //       //   newY = 0
+        //       // }
 
-              // Clamp Right/Bottom (shrink width/height if they exceed crop bounds)
-              if (newX + newW > box.w) {
-                newW = box.w - newX
-              }
-              if (newY + newH > box.h) {
-                newH = box.h - newY
-              }
+        //       // // Clamp Right/Bottom (shrink width/height if they exceed crop bounds)
+        //       // if (newX + newW > box.w) {
+        //       //   newW = box.w - newX
+        //       // }
+        //       // if (newY + newH > box.h) {
+        //       //   newH = box.h - newY
+        //       // }
 
-              return { ...anno, x: newX, y: newY, w: newW, h: newH }
-            })
-            // Remove boxes that have been shrunk to zero (entirely outside)
-            .filter((anno) => anno.w > 0 && anno.h > 0)
-        });
+        //       // return { ...anno, x: newX, y: newY, w: newW, h: newH }
+        //     })
+        //     // Remove boxes that have been shrunk to zero (entirely outside)
+        //     .filter((anno) => anno.w > 0 && anno.h > 0)
+        // });
 
         setImageURL(data.converted_url)
         setImageSize({width: box.width, height: box.height})

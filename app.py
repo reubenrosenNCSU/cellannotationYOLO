@@ -354,8 +354,9 @@ def upload_cropped_file():
 
         # Load original image, crop, and overwrite
         img = tifffile.imread(upload_path)
-        cropped_img = img[y:y+height, x:x+width]
-        tifffile.imwrite(upload_path, cropped_img)
+        padded_img = np.zeros_like(img)
+        padded_img[y:y+height, x:x+width] = img[y:y+height, x:x+width]
+        tifffile.imwrite(upload_path, padded_img)
 
         # Create and normalize png conversion of cropped image
         unique_id = str(uuid.uuid4())
@@ -532,6 +533,7 @@ def detect_madm():
 def detect_sgn():
     user_id = session['user_id']
     threshold = float(request.json.get('threshold', 0.5))
+    cell_diameter = float(request.json.get('cell_diameter', 34))
     upload_dir = os.path.join('users', user_id, 'uploads')
     merged_output_path = os.path.join('users', user_id, 'finaloutput', 'merged_sgn.txt')
     os.makedirs(os.path.dirname(merged_output_path), exist_ok=True)
@@ -543,14 +545,16 @@ def detect_sgn():
 
         image_path = os.path.join(upload_dir, files[0])
 
+        prep_data = preprocess_image(image_path, upload_dir, 'SGN', cell_diameter)
+
         with Image.open(image_path) as img:
             image_width, image_height = img.size
 
         final_annotation = detect_to_yolo(
-            image_path=image_path,
-            model_path='snapshots/SGN_best.pt',
-            image_width=image_width,
-            image_height=image_height,
+            image_path=prep_data['path'],
+            model_path=model_path,
+            image_width=prep_data['det_w'],
+            image_height=prep_data['det_h'],
             threshold=threshold,
         )
 
@@ -571,6 +575,7 @@ def detect_sgn():
 def detect_cd3():
     user_id = session['user_id']
     threshold = float(request.json.get('threshold', 0.5))
+    cell_diameter = float(request.json.get('cell_diameter', 34))
     upload_dir = os.path.join('users', user_id, 'uploads')
     merged_output_path = os.path.join('users', user_id, 'finaloutput', 'merged_cd3.txt')
     os.makedirs(os.path.dirname(merged_output_path), exist_ok=True)
@@ -582,14 +587,16 @@ def detect_cd3():
 
         image_path = os.path.join(upload_dir, files[0])
 
+        prep_data = preprocess_image(image_path, upload_dir, 'CD3', cell_diameter)
+
         with Image.open(image_path) as img:
             image_width, image_height = img.size
 
         final_annotation = detect_to_yolo(
-            image_path=image_path,
-            model_path='snapshots/cd3_v2.pt',
-            image_width=image_width,
-            image_height=image_height,
+            image_path=prep_data['path'],
+            model_path=model_path,
+            image_width=prep_data['det_w'],
+            image_height=prep_data['det_h'],
             threshold=threshold,
         )
 
@@ -861,29 +868,47 @@ def train_saved_data():
 @app.route('/detect-custom', methods=['POST'])
 def detect_custom():
     user_id = session['user_id']
+    upload_dir = os.path.join('users', user_id, 'uploads')
+    
+    threshold = float(request.form.get('threshold', 0.5))
+    cell_diameter = float(request.form.get('cell_diameter', 34))
+
     try:
         pt_file = request.files['pt_file']
         model_path = os.path.join('users', user_id, 'uploads', secure_filename(pt_file.filename))
         pt_file.save(model_path)
         
-        annotations, img_width, img_height, error = detect_with_tiling(user_id, model_path)
+        files = [f for f in os.listdir(upload_dir) if f.lower().endswith(('.tif', '.tiff', '.png', '.jpg', '.jpeg'))]
+        if not files:
+            return jsonify({'error': 'No image found in uploads.'}), 400
+        image_path = os.path.join(upload_dir, files[0])
+
+        prep_data = preprocess_image(image_path, upload_dir, 'SGN', cell_diameter)
         
-        try:
-            os.remove(model_path)
-        except:
-            pass
-            
-        if error:
-            return jsonify({'error': error}), 500
+        with Image.open(image_path) as img:
+            orig_w, orig_h = img.size
+        
+        annotations = detect_to_yolo(
+            image_path=prep_data['path'],
+            model_path=model_path,
+            image_width=orig_w,
+            image_height=orig_h,
+            threshold=threshold
+        )
+
+        # Cleanup: Remove model and temporary normalized PNG
+        for path in [model_path, prep_data['path']]:
+            if os.path.exists(path):
+                os.remove(path)
 
         return jsonify({
             "annotations": annotations,
-            "image_width": img_width,
-            "image_height": img_height
+            "image_width": orig_w,
+            "image_height": orig_h
         })
 
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': f"SAHI Detection failed: {str(e)}"}), 500
 
 @app.route('/scale-image', methods=['POST'])
 def scale_image():
