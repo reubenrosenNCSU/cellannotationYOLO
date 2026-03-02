@@ -73,6 +73,7 @@ export default function CellAnnotationTool() {
   const [kFoldResults, setKFoldResults] = useState()
   const [fineTuneModelURL, setFineTuneModelURL] = useState()
   const [metricsData, setMetricsData] = useState()
+  const [trainingData, setTrainingData] = useState([])
 
   useEffect(() => {
     if (annotations.length > 0) {
@@ -636,8 +637,24 @@ export default function CellAnnotationTool() {
         const errorData = await res.json().catch(() => ({}))
         throw new Error(errorData.error || `HTTP error! status: ${res.status}`)
       }
+
+      return res.json()
     })
-    .then(alert('Training data saved!'))
+    .then((data) => {
+      console.log('Success from Server:', data)
+
+      const newEntry = {
+        imageName: data.image_file,
+        annotationName: data.annotation_file,
+        thumbnailUrl: `/api/preview/${data.thumbnail_file}`,
+        timestamp: new Date().toLocaleTimeString(),
+        count: data.annotation_count
+      }
+
+      setTrainingData((prevData) => [...prevData, newEntry])
+      console.log(trainingData)
+      alert('Training data saved!')
+    })
   }
 
   function fineTune() {
@@ -1265,6 +1282,20 @@ export default function CellAnnotationTool() {
       )}
       <SideMenu anchorSide={'right'}>
         <Typography>hidey ho neighbor</Typography>
+        {trainingData.map((item, index) => (
+          <Box key={index} sx={{ textAlign: 'center' }}>
+            <Box
+              component="img"
+              src={item.thumbnailUrl} // Matches your newEntry key
+              alt="preview"
+              sx={{ width: 150, height: 150, border: '1px solid black' }}
+            />
+            <Typography variant="caption" sx={{ display: 'block' }}>
+              {/* Use imageName instead of name, and add a check */}
+              {item.imageName ? item.imageName.substring(0, 10) : 'N/A'}...
+            </Typography>
+          </Box>
+        ))}
       </SideMenu>
     </Box>
   )

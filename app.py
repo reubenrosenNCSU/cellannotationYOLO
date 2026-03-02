@@ -401,7 +401,10 @@ def save_training_data():
         user_upload_dir = os.path.join('users', user_id, 'uploads')
         saved_data_dir = os.path.join('users', user_id, 'saved_data')
         saved_annotations_dir = os.path.join('users', user_id, 'saved_annotations')
-        
+        thumbnail_dir = os.path.join('users', user_id, 'thumbnails')
+
+        os.makedirs(thumbnail_dir, exist_ok=True)
+
         # Copy ORIGINAL image (not the scaled version)
         original_path = os.path.join(user_upload_dir, original_filename)
         dest_filename = f"{unique_id}_{original_filename}"
@@ -412,6 +415,10 @@ def save_training_data():
             return jsonify({'error': 'Original image file not found'}), 404
         
         shutil.copy2(original_path, dest_path)
+
+        thumbnail_filename = f"thumb_{unique_id}.jpg"
+        thumbnail_path = os.path.join(thumbnail_dir, thumbnail_filename)
+        normalize_image(original_path, thumbnail_path)
         
         # Class mapping
         CLASS_MAP = {
@@ -449,6 +456,7 @@ def save_training_data():
         return jsonify({
             'message': 'Training data saved with original image and coordinates',
             'image_file': dest_filename,
+            'thumbnail_file': thumbnail_filename,
             'annotation_file': annotation_filename,
             'annotation_count': len(yolo_lines)
         })
