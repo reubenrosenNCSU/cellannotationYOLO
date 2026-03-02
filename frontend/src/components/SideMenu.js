@@ -1,10 +1,10 @@
 import { Drawer, Box } from "@mui/material";
 
-export default function SideMenu({children}) {
+export default function SideMenu({children, anchorSide}) {
 	return (
 		<Drawer
 			variant="permanent"
-			anchor="left"
+			anchor={anchorSide}
 			sx={{
 				width: "20vw",
 				flexShrink: 0,

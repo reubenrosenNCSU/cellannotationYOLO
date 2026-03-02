@@ -1207,7 +1207,7 @@ export default function CellAnnotationTool() {
 
   return (
     <Box sx={{ display: 'flex', height: '100vh', width: '100vw' }}>
-      <SideMenu>
+      <SideMenu anchorSide='left'>
         <Typography gutterBottom variant='h6' fontWeight={'bold'}>
             Cell Annotation Tool (CAT🐱)
         </Typography>
@@ -1263,6 +1263,9 @@ export default function CellAnnotationTool() {
       {calibratorOpen && (
         <CellCalibrator scale={scale} onClose={() => setCalibratorOpen(false)} />
       )}
+      <SideMenu anchorSide={'right'}>
+        <Typography>hidey ho neighbor</Typography>
+      </SideMenu>
     </Box>
   )
 }
