@@ -507,13 +507,17 @@ def clear_training_data():
     saved_data_dir = os.path.join('users', user_id, 'saved_data')
     saved_annotations_dir = os.path.join('users', user_id, 'saved_annotations')
     yolo_dataset_dir = os.path.join('users', user_id, 'yolo_dataset')  # New directory to clear
-    
+    thumbnail_dir = os.path.join('users', user_id, 'thumbnails')
+
     try:
         # Clear saved data
         clear_folder(saved_data_dir)
         
         # Clear saved annotations
         clear_folder(saved_annotations_dir)
+
+        # Clear thumbnails
+        clear_folder(thumbnail_dir)
         
         # Clear YOLO dataset if it exists
         if os.path.exists(yolo_dataset_dir):
