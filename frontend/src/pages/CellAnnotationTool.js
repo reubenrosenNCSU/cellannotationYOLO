@@ -80,6 +80,16 @@ export default function CellAnnotationTool() {
       detectCellDiameter()
     }
   }, [annotations])
+
+  useEffect(() => {
+    fetch('/get-all-training-data')
+      .then(res => res.json())
+      .then(data => {
+        // data is the array of objects from Python
+        setTrainingData(data);
+      })
+      .catch(err => console.error("Error loading gallery:", err));
+  }, []);
   
   // *----------* Image Operations *----------* \\
 
@@ -647,7 +657,6 @@ export default function CellAnnotationTool() {
         imageName: data.image_file,
         annotationName: data.annotation_file,
         thumbnailUrl: `/api/preview/${data.thumbnail_file}`,
-        timestamp: new Date().toLocaleTimeString(),
         count: data.annotation_count
       }
 
@@ -724,6 +733,23 @@ export default function CellAnnotationTool() {
     })
     .then(alert('All training data has been cleared!'))
   }
+
+  const deleteTrainingDataEntry = (uniqueId) => {
+    if (!window.confirm("Are you sure you want to delete this training sample?")) return;
+
+    fetch(`/delete-training-data/${uniqueId}`, {
+      method: 'DELETE',
+    })
+    .then(res => {
+      if (res.ok) {
+        // Remove from local state so the UI updates
+        setTrainingData(prev => prev.filter(item => !item.annotationName.includes(uniqueId)));
+      } else {
+        alert("Failed to delete from server.");
+      }
+    })
+    .catch(err => console.error("Delete error:", err));
+  };
 
   const handleModelDownload = async () => {
     try {
@@ -1282,20 +1308,31 @@ export default function CellAnnotationTool() {
       )}
       <SideMenu anchorSide={'right'}>
         <Typography>hidey ho neighbor</Typography>
-        {trainingData.map((item, index) => (
-          <Box key={index} sx={{ textAlign: 'center' }}>
-            <Box
-              component="img"
-              src={item.thumbnailUrl} // Matches your newEntry key
-              alt="preview"
-              sx={{ width: 150, height: 150, border: '1px solid black' }}
-            />
-            <Typography variant="caption" sx={{ display: 'block' }}>
-              {/* Use imageName instead of name, and add a check */}
-              {item.imageName ? item.imageName.substring(0, 10) : 'N/A'}...
-            </Typography>
-          </Box>
-        ))}
+        {trainingData.map((item, index) => {
+          const uniqueId = item.annotationName.replace('.txt', '')
+
+          return (
+            <Box key={index} sx={{ textAlign: 'center' }}>
+              <Box
+                component="img"
+                src={item.thumbnailUrl} // Matches your newEntry key
+                alt="preview"
+                sx={{ width: 150, height: 150, border: '1px solid black' }}
+              />
+              <Typography variant="caption" sx={{ display: 'block' }}>
+                {/* Use imageName instead of name, and add a check */}
+                {item.imageName ? item.imageName.substring(0, 10) : 'N/A'}...
+              </Typography>
+              {/* Quick Delete Button */}
+              <button 
+                onClick={() => deleteTrainingDataEntry(uniqueId)}
+                style={{ color: 'red', cursor: 'pointer', fontSize: '10px' }}
+              >
+                Delete
+              </button>
+            </Box>
+          )
+        })}
       </SideMenu>
     </Box>
   )

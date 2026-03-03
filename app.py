@@ -464,6 +464,41 @@ def save_training_data():
     except Exception as e:
         print(f"Error saving training data: {str(e)}")
         return jsonify({'error': str(e)}), 500
+
+@app.route('/get-all-training-data', methods=['GET'])
+def get_all_training_data():
+    user_id = session.get('user_id')
+    if not user_id:
+        return jsonify({'error': 'Unauthorized'}), 401
+
+    saved_annotations_dir = os.path.join('users', user_id, 'saved_annotations')
+    # Use a helper to find images (since filenames have unique IDs)
+    saved_data_dir = os.path.join('users', user_id, 'saved_data')
+    
+    results = []
+    
+    if os.path.exists(saved_annotations_dir):
+        # Loop through text files in the annotation folder
+        for ann_file in os.listdir(saved_annotations_dir):
+            if ann_file.endswith('.txt'):
+                unique_id = ann_file.replace('.txt', '')
+                
+                # Find the matching image (starts with the same unique_id)
+                image_file = "Unknown"
+                if os.path.exists(saved_data_dir):
+                    for f in os.listdir(saved_data_dir):
+                        if f.startswith(unique_id):
+                            image_file = f
+                            break
+                
+                results.append({
+                    'imageName': image_file,
+                    'annotationName': ann_file,
+                    'thumbnailUrl': f"/api/preview/thumb_{unique_id}.jpg",
+                    # Add any extra info if you want to parse the txt file for counts
+                })
+                
+    return jsonify(results)
     
 
 @app.route('/clear-training-data', methods=['POST'])
@@ -490,6 +525,44 @@ def clear_training_data():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+import os
+
+@app.route('/delete-training-data/<unique_id>', methods=['DELETE'])
+def delete_training_data(unique_id):
+    user_id = session.get('user_id')
+    if not user_id:
+        return jsonify({'error': 'Unauthorized'}), 401
+
+    try:
+        # Define the directories
+        saved_data_dir = os.path.join('users', user_id, 'saved_data')
+        saved_annotations_dir = os.path.join('users', user_id, 'saved_annotations')
+        thumbnail_dir = os.path.join('users', user_id, 'thumbnails')
+
+        # 1. Delete Annotation File (The easiest to find)
+        ann_path = os.path.join(saved_annotations_dir, f"{unique_id}.txt")
+        if os.path.exists(ann_path):
+            os.remove(ann_path)
+
+        # 2. Delete Thumbnail
+        thumb_path = os.path.join(thumbnail_dir, f"thumb_{unique_id}.jpg")
+        if os.path.exists(thumb_path):
+            os.remove(thumb_path)
+
+        # 3. Delete Original Image
+        # Since the original image has the unique_id prepended (unique_id_filename.tif)
+        # we look for the file that starts with the unique_id
+        if os.path.exists(saved_data_dir):
+            for filename in os.listdir(saved_data_dir):
+                if filename.startswith(unique_id):
+                    os.remove(os.path.join(saved_data_dir, filename))
+                    break
+
+        return jsonify({'message': f'Dataset {unique_id} deleted successfully'}), 200
+
+    except Exception as e:
+        print(f"Error deleting data: {e}")
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/detect-madm', methods=['POST'])
 def detect_madm():
@@ -1157,8 +1230,6 @@ def serve_snapshot(filename):
     user_id = session['user_id']
     snapshot_dir = os.path.join('users', user_id, 'snapshots')
     return send_from_directory(snapshot_dir, filename)
-
-from flask import send_from_directory
 
 @app.route('/api/preview/<filename>')
 def serve_thumbnail(filename):
