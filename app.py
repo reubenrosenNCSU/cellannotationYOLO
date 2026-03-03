@@ -1158,6 +1158,18 @@ def serve_snapshot(filename):
     snapshot_dir = os.path.join('users', user_id, 'snapshots')
     return send_from_directory(snapshot_dir, filename)
 
+from flask import send_from_directory
+
+@app.route('/api/preview/<filename>')
+def serve_thumbnail(filename):
+    user_id = session['user_id']
+    
+    directory = os.path.join('users', str(user_id), 'thumbnails')
+    
+    print(f"Looking for thumbnail in: {directory}/{filename}") # Debug print
+    
+    return send_from_directory(directory, filename)
+
 
 from flask import jsonify, session
 from tensorflow.python.summary.summary_iterator import summary_iterator
