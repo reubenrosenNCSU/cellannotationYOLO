@@ -567,6 +567,47 @@ def delete_training_data(unique_id):
     except Exception as e:
         print(f"Error deleting data: {e}")
         return jsonify({'error': str(e)}), 500
+    
+
+@app.route('/download-training-data', methods=['GET'])
+def download_training_data():
+    user_id = session.get('user_id')
+    if not user_id:
+        return jsonify({'error': 'Unauthorized'}), 401
+
+    # Define paths
+    saved_data_dir = os.path.join('users', user_id, 'saved_data')
+    saved_annotations_dir = os.path.join('users', user_id, 'saved_annotations')
+
+    # Create an in-memory byte stream for the ZIP
+    zip_buffer = io.BytesIO()
+    
+    with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zf:
+        # 1. Add All Images
+        if os.path.exists(saved_data_dir):
+            for root, dirs, files in os.walk(saved_data_dir):
+                for file in files:
+                    file_path = os.path.join(root, file)
+                    # Store images in an 'images/' folder inside the zip
+                    zf.write(file_path, arcname=os.path.join('images', file))
+
+        # 2. Add All Annotations
+        if os.path.exists(saved_annotations_dir):
+            for root, dirs, files in os.walk(saved_annotations_dir):
+                for file in files:
+                    file_path = os.path.join(root, file)
+                    # Store txt files in a 'labels/' folder inside the zip
+                    zf.write(file_path, arcname=os.path.join('labels', file))
+
+    # Seek to the start of the stream so it can be read
+    zip_buffer.seek(0)
+    
+    return send_file(
+        zip_buffer,
+        mimetype='application/zip',
+        as_attachment=True,
+        download_name=f'yolo_dataset_{user_id}.zip'
+    )
 
 @app.route('/detect-madm', methods=['POST'])
 def detect_madm():

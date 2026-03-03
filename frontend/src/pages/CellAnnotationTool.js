@@ -791,6 +791,41 @@ export default function CellAnnotationTool() {
     }
   }
 
+  const handleTrainingDataDownload = async () => {
+    try {
+      const res = await fetch('/download-training-data', {
+        method: 'GET',
+        credentials: 'include', 
+      })
+
+      if (!res.ok) {
+        throw new Error(`Download failed: ${res.statusText}`)
+      }
+
+      // 2. Convert response to Blob
+      const blob = await res.blob()
+      const url = window.URL.createObjectURL(blob)
+
+      // 3. Create invisible link and click
+      const a = document.createElement('a')
+      a.href = url
+      
+      const filename = 'training_data.zip'
+      a.download = filename
+      
+      document.body.appendChild(a)
+      a.click()
+      
+      // 4. Cleanup
+      a.remove()
+      window.URL.revokeObjectURL(url)
+
+    } catch (error) {
+      console.error('Download error:', error)
+      alert('Failed to download training data. Please try again.')
+    }
+  }
+
   function getMetrics() {
     fetch('/events-data', {
       method: 'GET'
@@ -1307,7 +1342,16 @@ export default function CellAnnotationTool() {
         <CellCalibrator scale={scale} onClose={() => setCalibratorOpen(false)} />
       )}
       <SideMenu anchorSide={'right'}>
-        <Typography>hidey ho neighbor</Typography>
+        <Typography>Training Data</Typography>
+        <Button 
+          variant="contained" 
+          color="primary"
+          onClick={handleTrainingDataDownload}
+          sx={{ mt: 2 }} // 'mt: 2' is MUI shorthand for marginTop: 16px
+          startIcon={<DownloadIcon />} // Optional: adds a nice download icon
+        >
+          Download Training Data (.zip)
+        </Button>
         {trainingData.map((item, index) => {
           const uniqueId = item.annotationName.replace('.txt', '')
 
