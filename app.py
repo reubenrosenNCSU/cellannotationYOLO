@@ -1286,6 +1286,18 @@ def serve_thumbnail(filename):
     
     return send_from_directory(directory, filename)
 
+@app.route('/api/images/<filename>')
+def serve_original_image(filename):
+    user_id = session.get('user_id')
+    directory = os.path.join('users', user_id, 'saved_data')
+    return send_from_directory(directory, filename)
+
+@app.route('/api/annotations/<filename>')
+def serve_annotation_file(filename):
+    user_id = session.get('user_id')
+    directory = os.path.join('users', user_id, 'saved_annotations')
+    return send_from_directory(directory, filename)
+
 
 from flask import jsonify, session
 from tensorflow.python.summary.summary_iterator import summary_iterator

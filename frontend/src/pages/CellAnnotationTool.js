@@ -731,11 +731,14 @@ export default function CellAnnotationTool() {
         throw new Error(errorData.error || `HTTP error! status: ${res.status}`)
       }
     })
-    .then(alert('All training data has been cleared!'))
+    .then(
+      alert('All training data has been cleared!'),
+      setTrainingData([])
+    )
   }
 
   const deleteTrainingDataEntry = (uniqueId) => {
-    if (!window.confirm("Are you sure you want to delete this training sample?")) return;
+    if (!window.confirm("Are you sure you want to delete this training sample?")) return
 
     fetch(`/delete-training-data/${uniqueId}`, {
       method: 'DELETE',
@@ -743,12 +746,61 @@ export default function CellAnnotationTool() {
     .then(res => {
       if (res.ok) {
         // Remove from local state so the UI updates
-        setTrainingData(prev => prev.filter(item => !item.annotationName.includes(uniqueId)));
+        setTrainingData(prev => prev.filter(item => !item.annotationName.includes(uniqueId)))
       } else {
         alert("Failed to delete from server.");
       }
     })
     .catch(err => console.error("Delete error:", err));
+  }
+
+  const loadSavedEntry = async (item) => {
+      const confirmLoad = window.confirm("Loading this will clear your current work. Continue?")
+      if (!confirmLoad) return
+
+      try {
+          // 1. IMPORTANT: Use the original image, not the thumbnail!
+          const imageLink = `${item.thumbnailUrl}`
+          
+          // 2. Fetch annotations
+          const response = await fetch(`/api/annotations/${item.annotationName}`)
+          if (!response.ok) throw new Error('Failed to fetch annotations')
+          const yoloText = await response.text()
+
+          // 3. We need the image dimensions to convert normalized -> pixels
+          // If they aren't in 'item', we can get them from the imageURL loading later
+          // For now, let's assume imageSize is already correct or will be updated
+          const { width, height } = imageSize; 
+
+          const lines = yoloText.trim().split('\n')
+          const parsedAnnotations = lines.filter(line => line.trim()).map(line => {
+              const [classId, x_norm, y_norm, w_norm, h_norm] = line.split(' ').map(Number)
+              
+              // YOLO (center_x, center_y, width, height) -> Canvas (top_left_x, top_left_y, width, height)
+              const w = w_norm * width
+              const h = h_norm * height
+              const x = (x_norm * width) - (w / 2)
+              const y = (y_norm * height) - (h / 2)
+
+              return {
+                  id: Math.random().toString(36).substr(2, 9),
+                  class: classId,
+                  x: x,
+                  y: y,
+                  w: w,
+                  h: h
+              };
+          });
+
+          // 4. Update states
+          setImageName(item.imageName)
+          setImageURL(imageLink)
+          setAnnotations(parsedAnnotations)
+          
+      } catch (error) {
+          console.error("Load failed:", error)
+          alert('Load failed: ' + error.message)
+      }
   };
 
   const handleModelDownload = async () => {
@@ -1361,7 +1413,17 @@ export default function CellAnnotationTool() {
                 component="img"
                 src={item.thumbnailUrl} // Matches your newEntry key
                 alt="preview"
-                sx={{ width: 150, height: 150, border: '1px solid black' }}
+                onClick={() => loadSavedEntry(item)}
+                sx={{
+                  width: 150,
+                  height: 150,
+                  border: '1px solid black',
+                  cursor: 'pointer', 
+                  '&:hover': { opacity: 0.8, border: '1px solid #1976d2' },
+                  mb: 2,
+                  p: 1,
+                  borderRadius: 1
+                }}
               />
               <Typography variant="caption" sx={{ display: 'block' }}>
                 {/* Use imageName instead of name, and add a check */}

@@ -4,9 +4,9 @@ import ChevronLeftIcon from "@mui/icons-material/ChevronLeft";
 import ChevronRightIcon from "@mui/icons-material/ChevronRight";
 
 export default function SideMenu({ children, anchorSide = "left" }) {
-    const [open, setOpen] = useState(true);
-    const drawerWidth = 280;
-    const isLeft = anchorSide === "left";
+    const [open, setOpen] = useState(true)
+    const drawerWidth = 280
+    const isLeft = anchorSide === "left"
 
     // Helper: Determine which icon to show
     const getIcon = () => {
@@ -53,10 +53,12 @@ export default function SideMenu({ children, anchorSide = "left" }) {
                         top: 24,
                         // Position tab on the "inside" edge (facing the content)
                         [isLeft ? "right" : "left"]: -40, 
-                        bgcolor: "primary.main",
+                        bgcolor: "contained.background",
                         color: "white",
                         // Round the corners that face the main content
                         borderRadius: isLeft ? "0 8px 8px 0" : "8px 0 0 8px",
+                        border: 1,
+                        borderColor: "primary.main",
                         zIndex: 1201,
                         width: 40,
                         height: 40,
@@ -72,5 +74,5 @@ export default function SideMenu({ children, anchorSide = "left" }) {
                 </Box>
             </Drawer>
         </Box>
-    );
+    )
 }
