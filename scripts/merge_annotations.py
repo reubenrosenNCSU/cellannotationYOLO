@@ -14,27 +14,29 @@ def merge_annotations(tiles_dir, output_file, tile_size=512, image_width=None, i
                 x_offset = int(parts[1])
                 y_offset = int(parts[2])
 
+                # Inside the loop for each line in the .txt file
                 with open(os.path.join(tiles_dir, file)) as f:
+                    # Calculate the ACTUAL size of this specific tile
+                    current_tile_w = min(tile_size, image_width - x_offset)
+                    current_tile_h = min(tile_size, image_height - y_offset)
+
                     for line in f:
                         parts = line.strip().split()
-                        if len(parts) != 5:
-                            continue
                         cls, cx, cy, w, h = map(float, parts)
 
-                        # Convert back to full image coords
-                        cx = cx * tile_size + x_offset
-                        cy = cy * tile_size + y_offset
-                        w = w * tile_size
-                        h = h * tile_size
+                        # 1. Denormalize relative to the current tile size
+                        absolute_x = (cx * current_tile_w) + x_offset
+                        absolute_y = (cy * current_tile_h) + y_offset
+                        absolute_w = w * current_tile_w
+                        absolute_h = h * current_tile_h
 
-                        # Convert back to normalized full-image coords if desired
-                        if image_width and image_height:
-                            cx /= image_width
-                            cy /= image_height
-                            w /= image_width
-                            h /= image_height
+                        # 2. Normalize relative to the full image
+                        cx_final = absolute_x / image_width
+                        cy_final = absolute_y / image_height
+                        w_final = absolute_w / image_width
+                        h_final = absolute_h / image_height
 
-                        out.write(f"{int(cls)} {cx:.6f} {cy:.6f} {w:.6f} {h:.6f}\n")
+                        out.write(f"{int(cls)} {cx_final:.6f} {cy_final:.6f} {w_final:.6f} {h_final:.6f}\n")
 
     print(f"Saved merged annotations to {output_file}")
 

@@ -23,116 +23,57 @@ import glob
 import tensorflow as tf
 from ultralytics import YOLO
 from scripts.normalization import normalize_image
+from scripts.sahi_detect import detect_to_yolo
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))  # Gets directory where app.py is
 from PIL import Image
+import tifffile
 # Disable decompression bomb protection for large TIFF files
 Image.MAX_IMAGE_PIXELS = None
 
-def batch_process_image_yolo(user_id, image_path, detection_type, threshold, model_path=None, cell_diameter=34):
+def preprocess_image(image_path, upload_dir, detection_type, cell_diameter):
     """
-    Minimal-safe batch processing:
-      - normalize (for detection only) -> detection image (PNG)
-      - run split -> detect -> merge using the detection image dimensions
-      - create a scaled copy of the ORIGINAL TIFF (no normalization applied) sized to detection dims
-      - save merged .txt next to the scaled TIFF
-      - return paths to scaled TIFF and matching TXT
+    Standardizes any input image (TIFF/PNG/JPG) for the YOLO model.
+    Returns: (path_to_detection_image, det_w, det_h, scaling_factor)
     """
-    try:
-        # --- per-user directories ---
-        upload_dir = os.path.join('users', user_id, 'uploads')
-        final_dir = os.path.join('users', user_id, 'finaloutput')
-        tiles_dir = os.path.join('users', user_id, 'images', 'tiles')
-        output_txt_dir = os.path.join('users', user_id, 'images', 'tiles_output')
+    # 1. Generate unique IDs to prevent race conditions
+    img_uuid = uuid.uuid4().hex[:8]
+    base_name = os.path.splitext(os.path.basename(image_path))[0]
+    
+    # 2. Normalize (Detection-only copy)
+    normalized_path = os.path.join(upload_dir, f"norm_{img_uuid}_{base_name}.png")
+    normalize_image(image_path, normalized_path)
 
-        # Ensure directories exist and are clean for this run
-        for d in [tiles_dir, output_txt_dir]:
-            shutil.rmtree(d, ignore_errors=True)
-            os.makedirs(d, exist_ok=True)
-        os.makedirs(final_dir, exist_ok=True)
-
-        original_tiff_path = image_path
-        base_name = os.path.splitext(os.path.basename(image_path))[0]
-
-        # --- 1) Create a normalized PNG (detection-only). Use unique name to avoid collisions ---
-        norm_uuid = uuid.uuid4().hex[:8]
-        normalized_basename = f"normalized_{norm_uuid}_{base_name}.png"
-        normalized_path = os.path.join(upload_dir, normalized_basename)
-        normalize_image(image_path, normalized_path)  # this is detection-only
-
-        # --- 2) Optionally scale the normalized PNG for detection ---
-        scaling_factor = 1.0
-        target_diameter = 20.0 if detection_type == 'CD3' else 34.0
-        if float(cell_diameter) != target_diameter:
-            scaling_factor = target_diameter / float(cell_diameter)
-            with Image.open(normalized_path) as img:
-                w, h = img.size
-                det_w = max(1, int(round(w * scaling_factor)))
-                det_h = max(1, int(round(h * scaling_factor)))
-                scaled_norm_name = f"scaled_norm_{norm_uuid}_{base_name}.png"
-                scaled_norm_path = os.path.join(upload_dir, scaled_norm_name)
-                scaled_img = img.resize((det_w, det_h), Image.Resampling.LANCZOS)
-                # Save PNG (for detection)
-                scaled_img.save(scaled_norm_path, format='PNG')
-                detection_path = scaled_norm_path
-        else:
-            with Image.open(normalized_path) as img:
-                det_w, det_h = img.size
-            detection_path = normalized_path
-
-        # --- 3) Select model ---
-        model_map = {
-            'SGN': 'snapshots/SGN_best.pt',
-            'MADM': 'snapshots/MADM_v3.pt',
-            'CD3': 'snapshots/cd3_v3.pt'
-        }
-        model_path = model_path or model_map.get(detection_type)
-        if not model_path:
-            return {'success': False, 'error': 'Invalid model configuration (no model found)'}
-
-        # --- 4) Split detection image into tiles, detect, then merge using detection dims ---
-        subprocess.run(['python3', 'scripts/split_image.py', '--image', detection_path, '--output', tiles_dir], check=True)
-        detect_tiles_in_batch(tiles_dir, output_txt_dir, model_path, threshold)
-
-        # Ensure we have detection dimensions (defensive)
-        with Image.open(detection_path) as dimg:
-            det_w, det_h = dimg.size
-
-        # merged txt filename unique + paired with scaled tiff base
-        out_uuid = uuid.uuid4().hex[:8]
-        out_base = f"{base_name}_scaled_{int(round(float(cell_diameter)))}_{out_uuid}"
-        merged_txt_path = os.path.join(final_dir, out_base + ".txt")
-
-        # merge_annotations must write the YOLO-format annotations normalized for det_w/det_h
-        subprocess.run([
-            'python3', 'scripts/merge_annotations.py',
-            '--tiles', output_txt_dir,
-            '--output', merged_txt_path,
-            '--image_width', str(det_w),
-            '--image_height', str(det_h)
-        ], check=True)
-
-        # --- 5) Create a SCALED COPY of the ORIGINAL TIFF (preserve mode/bitdepth) ---
-        scaled_tiff_path = os.path.join(final_dir, out_base + ".tiff")
-        with Image.open(original_tiff_path) as orig_img:
-            # Resize but DO NOT convert mode — this preserves the original "look" (e.g. pitch black)
-            scaled_orig = orig_img.resize((det_w, det_h), Image.Resampling.LANCZOS)
-            # Save as TIFF without forcing RGB conversion
-            scaled_orig.save(scaled_tiff_path, format='TIFF')
-
-        # Done — return paired paths
+    # 3. Calculate Scaling
+    target_diameter = 20.0 if detection_type == 'CD3' else 34.0
+    scaling_factor = target_diameter / float(cell_diameter)
+    
+    with Image.open(normalized_path) as img:
+        orig_w, orig_h = img.size
+        
+    if scaling_factor != 1.0:
+        det_w = max(1, int(round(orig_w * scaling_factor)))
+        det_h = max(1, int(round(orig_h * scaling_factor)))
+        
+        scaled_path = os.path.join(upload_dir, f"scaled_{img_uuid}_{base_name}.png")
+        with Image.open(normalized_path) as img:
+            scaled_img = img.resize((det_w, det_h), Image.Resampling.LANCZOS)
+            scaled_img.save(scaled_path, format='PNG')
+        
+        # We can remove the intermediate normalized path to save space
+        if os.path.exists(normalized_path): os.remove(normalized_path)
         return {
-            'success': True,
-            'tiff_path': scaled_tiff_path,
-            'txt_path': merged_txt_path,
-            'det_width': det_w,
-            'det_height': det_h,
-            'scaling_factor': scaling_factor
+            "path": scaled_path,
+            "det_w": det_w,
+            "det_h": det_h,
+            "scaling_factor": scaling_factor
         }
-
-    except Exception as e:
-        # Return exception info so batch-detect can include error files in ZIP
-        return {'success': False, 'error': str(e)}
-
+    
+    return {
+        "path": normalized_path,
+        "det_w": orig_w,
+        "det_h": orig_h,
+        "scaling_factor": scaling_factor
+    }
 
 
 def detect_with_tiling(user_id, model_path, threshold=0.5): #Helper function for fine tuning testing on singular image
@@ -308,6 +249,9 @@ def clear_uploaded_images():
                 print(f"Error deleting {file_path}: {e}")
 
 
+@app.route("/api/hello")
+def hello():
+    return jsonify({"message": "Hello from Flask API"})
 
 @app.route('/upload', methods=['POST'])
 def upload_file():
@@ -348,7 +292,8 @@ def upload_file():
             'converted_url': f'/converted/{output_filename}',
             'original_name': original_name,
             'base_name': base_name,
-            'original_extension': original_extension
+            'original_extension': original_extension,
+            'dimensions': img.size
         })
         
     except Exception as e:
@@ -406,28 +351,23 @@ def upload_cropped_file():
 
         # Path to original TIFF
         upload_path = os.path.join(user_upload_dir, original_name)
-        
-        # Open and crop original image
-        with Image.open(upload_path) as img:
-            # Perform crop on original TIFF
-            cropped_img = img.crop((x, y, x + width, y + height))
-            
-            # Overwrite original file with cropped version
-            cropped_img.save(upload_path, format='TIFF', compression='tiff_deflate')
-            # 🔄 Update original and current dimensions to CROPPED size
-            session['original_dimensions'] = cropped_img.size  # (new_width, new_height)
-            session['current_dimensions'] = cropped_img.size
 
+        # Load original image, crop, and overwrite
+        img = tifffile.imread(upload_path)
+        padded_img = np.zeros_like(img)
+        padded_img[y:y+height, x:x+width] = img[y:y+height, x:x+width]
+        tifffile.imwrite(upload_path, padded_img)
 
-        # Generate new PNG preview from updated TIFF
+        # Create and normalize png conversion of cropped image
         unique_id = str(uuid.uuid4())
         output_filename = f"{unique_id}.png"
         output_path = os.path.join(user_convert_dir, output_filename)
-        cropped_img.save(output_path, "PNG")
+        
+        normalize_image(upload_path, output_path)
 
         return jsonify({
             'converted_url': f'/converted/{output_filename}',
-            'original_name': original_name,  # Keep original filename
+            'original_name': original_name,
             'base_name': os.path.splitext(original_name)[0],
             'original_extension': 'tiff'
         })
@@ -437,112 +377,6 @@ def upload_cropped_file():
         return jsonify({'error': f"Server error: {str(e)}"}), 500
     
 from scripts.detect_tiles import detect_tiles_in_batch
-
-@app.route('/detect-sgn', methods=['POST'])
-def detect_sgn():
-    import json
-
-    user_id = session['user_id']
-    threshold = float(request.json.get('threshold', 0.5))
-    upload_dir = os.path.join('users', user_id, 'uploads')
-    tiles_dir = os.path.join('users', user_id, 'images', 'tiles')
-    output_txt_dir = os.path.join('users', user_id, 'images', 'tiles_output')
-    merged_output_path = os.path.join('users', user_id, 'finaloutput', 'merged_sgn.txt')
-
-    os.makedirs(tiles_dir, exist_ok=True)
-    os.makedirs(output_txt_dir, exist_ok=True)
-
-    try:
-        files = [f for f in os.listdir(upload_dir) if f.lower().endswith(('.tif', '.tiff', '.png', '.jpg', '.jpeg'))]
-        if not files:
-            return jsonify({'error': 'No image found. Upload an image first.'}), 400
-
-        image_path = os.path.join(upload_dir, files[0])
-        model_path = 'snapshots/SGN_best.pt'
-
-        # Step 1: Split into tiles
-        subprocess.run(['python3', 'scripts/split_image.py', '--image', image_path, '--output', tiles_dir], check=True)
-
-        # Step 2: Detect all tiles using GPU-efficient function
-        detect_tiles_in_batch(tiles_dir, output_txt_dir, model_path, threshold)
-
-        # Get image size from original
-        with Image.open(image_path) as img:
-            image_width, image_height = img.size
-
-        # Step 3: Merge annotations
-        subprocess.run([
-            'python3', 'scripts/merge_annotations.py',
-            '--tiles', output_txt_dir,
-            '--output', merged_output_path,
-            '--image_width', str(image_width),
-            '--image_height', str(image_height)
-        ], check=True)
-
-        with open(merged_output_path, 'r') as f:
-            final_annotation = f.read()
-
-        return jsonify({
-            "annotations": final_annotation,
-            "image_width": image_width,
-            "image_height": image_height
-        })
-
-    except Exception as e:
-        return jsonify({'error': f'Detection failed: {str(e)}'}), 500
-
-@app.route('/detect-cd3', methods=['POST'])
-def detect_cd3():
-    user_id = session['user_id']
-    threshold = float(request.json.get('threshold', 0.5))
-    upload_dir = os.path.join('users', user_id, 'uploads')
-    tiles_dir = os.path.join('users', user_id, 'images', 'tiles')
-    output_txt_dir = os.path.join('users', user_id, 'images', 'tiles_output')
-    merged_output_path = os.path.join('users', user_id, 'finaloutput', 'merged_cd3.txt')
-
-    os.makedirs(tiles_dir, exist_ok=True)
-    os.makedirs(output_txt_dir, exist_ok=True)
-
-    try:
-        files = [f for f in os.listdir(upload_dir) if f.lower().endswith(('.tif', '.tiff', '.png', '.jpg', '.jpeg'))]
-        if not files:
-            return jsonify({'error': 'No image found. Upload an image first.'}), 400
-
-        image_path = os.path.join(upload_dir, files[0])
-        model_path = 'snapshots/cd3_v2.pt'  # Changed model path
-
-        # Split into tiles
-        subprocess.run(['python3', 'scripts/split_image.py', '--image', image_path, '--output', tiles_dir], check=True)
-
-        # Detect all tiles
-        detect_tiles_in_batch(tiles_dir, output_txt_dir, model_path, threshold)
-
-        # Get image size
-        with Image.open(image_path) as img:
-            image_width, image_height = img.size
-
-        # Merge annotations
-        subprocess.run([
-            'python3', 'scripts/merge_annotations.py',
-            '--tiles', output_txt_dir,
-            '--output', merged_output_path,
-            '--image_width', str(image_width),
-            '--image_height', str(image_height)
-        ], check=True)
-
-        with open(merged_output_path, 'r') as f:
-            final_annotation = f.read()
-
-        return jsonify({
-            "annotations": final_annotation,
-            "image_width": image_width,
-            "image_height": image_height
-        })
-
-    except Exception as e:
-        return jsonify({'error': f'CD3 detection failed: {str(e)}'}), 500
-
-
 
 
 @app.route('/converted/<filename>')
@@ -567,7 +401,10 @@ def save_training_data():
         user_upload_dir = os.path.join('users', user_id, 'uploads')
         saved_data_dir = os.path.join('users', user_id, 'saved_data')
         saved_annotations_dir = os.path.join('users', user_id, 'saved_annotations')
-        
+        thumbnail_dir = os.path.join('users', user_id, 'thumbnails')
+
+        os.makedirs(thumbnail_dir, exist_ok=True)
+
         # Copy ORIGINAL image (not the scaled version)
         original_path = os.path.join(user_upload_dir, original_filename)
         dest_filename = f"{unique_id}_{original_filename}"
@@ -578,6 +415,10 @@ def save_training_data():
             return jsonify({'error': 'Original image file not found'}), 404
         
         shutil.copy2(original_path, dest_path)
+
+        thumbnail_filename = f"thumb_{unique_id}.jpg"
+        thumbnail_path = os.path.join(thumbnail_dir, thumbnail_filename)
+        normalize_image(original_path, thumbnail_path)
         
         # Class mapping
         CLASS_MAP = {
@@ -615,6 +456,7 @@ def save_training_data():
         return jsonify({
             'message': 'Training data saved with original image and coordinates',
             'image_file': dest_filename,
+            'thumbnail_file': thumbnail_filename,
             'annotation_file': annotation_filename,
             'annotation_count': len(yolo_lines)
         })
@@ -622,6 +464,41 @@ def save_training_data():
     except Exception as e:
         print(f"Error saving training data: {str(e)}")
         return jsonify({'error': str(e)}), 500
+
+@app.route('/get-all-training-data', methods=['GET'])
+def get_all_training_data():
+    user_id = session.get('user_id')
+    if not user_id:
+        return jsonify({'error': 'Unauthorized'}), 401
+
+    saved_annotations_dir = os.path.join('users', user_id, 'saved_annotations')
+    # Use a helper to find images (since filenames have unique IDs)
+    saved_data_dir = os.path.join('users', user_id, 'saved_data')
+    
+    results = []
+    
+    if os.path.exists(saved_annotations_dir):
+        # Loop through text files in the annotation folder
+        for ann_file in os.listdir(saved_annotations_dir):
+            if ann_file.endswith('.txt'):
+                unique_id = ann_file.replace('.txt', '')
+                
+                # Find the matching image (starts with the same unique_id)
+                image_file = "Unknown"
+                if os.path.exists(saved_data_dir):
+                    for f in os.listdir(saved_data_dir):
+                        if f.startswith(unique_id):
+                            image_file = f
+                            break
+                
+                results.append({
+                    'imageName': image_file,
+                    'annotationName': ann_file,
+                    'thumbnailUrl': f"/api/preview/thumb_{unique_id}.jpg",
+                    # Add any extra info if you want to parse the txt file for counts
+                })
+                
+    return jsonify(results)
     
 
 @app.route('/clear-training-data', methods=['POST'])
@@ -630,13 +507,17 @@ def clear_training_data():
     saved_data_dir = os.path.join('users', user_id, 'saved_data')
     saved_annotations_dir = os.path.join('users', user_id, 'saved_annotations')
     yolo_dataset_dir = os.path.join('users', user_id, 'yolo_dataset')  # New directory to clear
-    
+    thumbnail_dir = os.path.join('users', user_id, 'thumbnails')
+
     try:
         # Clear saved data
         clear_folder(saved_data_dir)
         
         # Clear saved annotations
         clear_folder(saved_annotations_dir)
+
+        # Clear thumbnails
+        clear_folder(thumbnail_dir)
         
         # Clear YOLO dataset if it exists
         if os.path.exists(yolo_dataset_dir):
@@ -647,21 +528,95 @@ def clear_training_data():
     
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+import os
+
+@app.route('/delete-training-data/<unique_id>', methods=['DELETE'])
+def delete_training_data(unique_id):
+    user_id = session.get('user_id')
+    if not user_id:
+        return jsonify({'error': 'Unauthorized'}), 401
+
+    try:
+        # Define the directories
+        saved_data_dir = os.path.join('users', user_id, 'saved_data')
+        saved_annotations_dir = os.path.join('users', user_id, 'saved_annotations')
+        thumbnail_dir = os.path.join('users', user_id, 'thumbnails')
+
+        # 1. Delete Annotation File (The easiest to find)
+        ann_path = os.path.join(saved_annotations_dir, f"{unique_id}.txt")
+        if os.path.exists(ann_path):
+            os.remove(ann_path)
+
+        # 2. Delete Thumbnail
+        thumb_path = os.path.join(thumbnail_dir, f"thumb_{unique_id}.jpg")
+        if os.path.exists(thumb_path):
+            os.remove(thumb_path)
+
+        # 3. Delete Original Image
+        # Since the original image has the unique_id prepended (unique_id_filename.tif)
+        # we look for the file that starts with the unique_id
+        if os.path.exists(saved_data_dir):
+            for filename in os.listdir(saved_data_dir):
+                if filename.startswith(unique_id):
+                    os.remove(os.path.join(saved_data_dir, filename))
+                    break
+
+        return jsonify({'message': f'Dataset {unique_id} deleted successfully'}), 200
+
+    except Exception as e:
+        print(f"Error deleting data: {e}")
+        return jsonify({'error': str(e)}), 500
     
+
+@app.route('/download-training-data', methods=['GET'])
+def download_training_data():
+    user_id = session.get('user_id')
+    if not user_id:
+        return jsonify({'error': 'Unauthorized'}), 401
+
+    # Define paths
+    saved_data_dir = os.path.join('users', user_id, 'saved_data')
+    saved_annotations_dir = os.path.join('users', user_id, 'saved_annotations')
+
+    # Create an in-memory byte stream for the ZIP
+    zip_buffer = io.BytesIO()
+    
+    with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zf:
+        # 1. Add All Images
+        if os.path.exists(saved_data_dir):
+            for root, dirs, files in os.walk(saved_data_dir):
+                for file in files:
+                    file_path = os.path.join(root, file)
+                    # Store images in an 'images/' folder inside the zip
+                    zf.write(file_path, arcname=os.path.join('images', file))
+
+        # 2. Add All Annotations
+        if os.path.exists(saved_annotations_dir):
+            for root, dirs, files in os.walk(saved_annotations_dir):
+                for file in files:
+                    file_path = os.path.join(root, file)
+                    # Store txt files in a 'labels/' folder inside the zip
+                    zf.write(file_path, arcname=os.path.join('labels', file))
+
+    # Seek to the start of the stream so it can be read
+    zip_buffer.seek(0)
+    
+    return send_file(
+        zip_buffer,
+        mimetype='application/zip',
+        as_attachment=True,
+        download_name=f'yolo_dataset_{user_id}.zip'
+    )
 
 @app.route('/detect-madm', methods=['POST'])
 def detect_madm():
-    import json
-
     user_id = session['user_id']
     threshold = float(request.json.get('threshold', 0.5))
+    cell_diameter = float(request.json.get('cell_diameter', 34))
     upload_dir = os.path.join('users', user_id, 'uploads')
-    tiles_dir = os.path.join('users', user_id, 'images', 'tiles')
-    output_txt_dir = os.path.join('users', user_id, 'images', 'tiles_output')
     merged_output_path = os.path.join('users', user_id, 'finaloutput', 'merged_madm.txt')
-
-    os.makedirs(tiles_dir, exist_ok=True)
-    os.makedirs(output_txt_dir, exist_ok=True)
+    os.makedirs(os.path.dirname(merged_output_path), exist_ok=True)
 
     try:
         files = [f for f in os.listdir(upload_dir) if f.lower().endswith(('.tif', '.tiff', '.png', '.jpg', '.jpeg'))]
@@ -671,27 +626,24 @@ def detect_madm():
         image_path = os.path.join(upload_dir, files[0])
         model_path = 'snapshots/MADM_v3.pt'
 
-        # Step 1: Split into tiles
-        subprocess.run(['python3', 'scripts/split_image.py', '--image', image_path, '--output', tiles_dir], check=True)
+        prep_data = preprocess_image(image_path, upload_dir, 'MADM', cell_diameter)
 
-        # Step 2: Detect all tiles using GPU-efficient function
-        detect_tiles_in_batch(tiles_dir, output_txt_dir, model_path, threshold)
-
-        # Get image size from original
         with Image.open(image_path) as img:
             image_width, image_height = img.size
 
-        # Step 3: Merge annotations
-        subprocess.run([
-            'python3', 'scripts/merge_annotations.py',
-            '--tiles', output_txt_dir,
-            '--output', merged_output_path,
-            '--image_width', str(image_width),
-            '--image_height', str(image_height)
-        ], check=True)
+        final_annotation = detect_to_yolo(
+            image_path=prep_data['path'],
+            model_path=model_path,
+            image_width=prep_data['det_w'],
+            image_height=prep_data['det_h'],
+            threshold=threshold,
+        )
 
-        with open(merged_output_path, 'r') as f:
-            final_annotation = f.read()
+        with open(merged_output_path, 'w') as f:
+            f.write(final_annotation)
+
+        if os.path.exists(prep_data['path']):
+            os.remove(prep_data['path'])
 
         return jsonify({
             "annotations": final_annotation,
@@ -703,6 +655,88 @@ def detect_madm():
         return jsonify({'error': f'Detection failed: {str(e)}'}), 500
 
 
+@app.route('/detect-sgn', methods=['POST'])
+def detect_sgn():
+    user_id = session['user_id']
+    threshold = float(request.json.get('threshold', 0.5))
+    cell_diameter = float(request.json.get('cell_diameter', 34))
+    upload_dir = os.path.join('users', user_id, 'uploads')
+    merged_output_path = os.path.join('users', user_id, 'finaloutput', 'merged_sgn.txt')
+    os.makedirs(os.path.dirname(merged_output_path), exist_ok=True)
+
+    try:
+        files = [f for f in os.listdir(upload_dir) if f.lower().endswith(('.tif', '.tiff', '.png', '.jpg', '.jpeg'))]
+        if not files:
+            return jsonify({'error': 'No image found. Upload an image first.'}), 400
+
+        image_path = os.path.join(upload_dir, files[0])
+
+        prep_data = preprocess_image(image_path, upload_dir, 'SGN', cell_diameter)
+
+        with Image.open(image_path) as img:
+            image_width, image_height = img.size
+
+        final_annotation = detect_to_yolo(
+            image_path=prep_data['path'],
+            model_path=model_path,
+            image_width=prep_data['det_w'],
+            image_height=prep_data['det_h'],
+            threshold=threshold,
+        )
+
+        with open(merged_output_path, 'w') as f:
+            f.write(final_annotation)
+
+        return jsonify({
+            "annotations": final_annotation,
+            "image_width": image_width,
+            "image_height": image_height
+        })
+
+    except Exception as e:
+        return jsonify({'error': f'Detection failed: {str(e)}'}), 500
+
+
+@app.route('/detect-cd3', methods=['POST'])
+def detect_cd3():
+    user_id = session['user_id']
+    threshold = float(request.json.get('threshold', 0.5))
+    cell_diameter = float(request.json.get('cell_diameter', 34))
+    upload_dir = os.path.join('users', user_id, 'uploads')
+    merged_output_path = os.path.join('users', user_id, 'finaloutput', 'merged_cd3.txt')
+    os.makedirs(os.path.dirname(merged_output_path), exist_ok=True)
+
+    try:
+        files = [f for f in os.listdir(upload_dir) if f.lower().endswith(('.tif', '.tiff', '.png', '.jpg', '.jpeg'))]
+        if not files:
+            return jsonify({'error': 'No image found. Upload an image first.'}), 400
+
+        image_path = os.path.join(upload_dir, files[0])
+
+        prep_data = preprocess_image(image_path, upload_dir, 'CD3', cell_diameter)
+
+        with Image.open(image_path) as img:
+            image_width, image_height = img.size
+
+        final_annotation = detect_to_yolo(
+            image_path=prep_data['path'],
+            model_path=model_path,
+            image_width=prep_data['det_w'],
+            image_height=prep_data['det_h'],
+            threshold=threshold,
+        )
+
+        with open(merged_output_path, 'w') as f:
+            f.write(final_annotation)
+
+        return jsonify({
+            "annotations": final_annotation,
+            "image_width": image_width,
+            "image_height": image_height
+        })
+
+    except Exception as e:
+        return jsonify({'error': f'CD3 detection failed: {str(e)}'}), 500
 
 
 @app.route('/train-saved', methods=['POST'])
@@ -960,29 +994,47 @@ def train_saved_data():
 @app.route('/detect-custom', methods=['POST'])
 def detect_custom():
     user_id = session['user_id']
+    upload_dir = os.path.join('users', user_id, 'uploads')
+    
+    threshold = float(request.form.get('threshold', 0.5))
+    cell_diameter = float(request.form.get('cell_diameter', 34))
+
     try:
         pt_file = request.files['pt_file']
         model_path = os.path.join('users', user_id, 'uploads', secure_filename(pt_file.filename))
         pt_file.save(model_path)
         
-        annotations, img_width, img_height, error = detect_with_tiling(user_id, model_path)
+        files = [f for f in os.listdir(upload_dir) if f.lower().endswith(('.tif', '.tiff', '.png', '.jpg', '.jpeg'))]
+        if not files:
+            return jsonify({'error': 'No image found in uploads.'}), 400
+        image_path = os.path.join(upload_dir, files[0])
+
+        prep_data = preprocess_image(image_path, upload_dir, 'SGN', cell_diameter)
         
-        try:
-            os.remove(model_path)
-        except:
-            pass
-            
-        if error:
-            return jsonify({'error': error}), 500
+        with Image.open(image_path) as img:
+            orig_w, orig_h = img.size
+        
+        annotations = detect_to_yolo(
+            image_path=prep_data['path'],
+            model_path=model_path,
+            image_width=orig_w,
+            image_height=orig_h,
+            threshold=threshold
+        )
+
+        # Cleanup: Remove model and temporary normalized PNG
+        for path in [model_path, prep_data['path']]:
+            if os.path.exists(path):
+                os.remove(path)
 
         return jsonify({
             "annotations": annotations,
-            "image_width": img_width,
-            "image_height": img_height
+            "image_width": orig_w,
+            "image_height": orig_h
         })
 
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': f"SAHI Detection failed: {str(e)}"}), 500
 
 @app.route('/scale-image', methods=['POST'])
 def scale_image():
@@ -1070,6 +1122,9 @@ def batch_detect():
     if not user_id:
         return jsonify({'error': 'No active user session'}), 400
 
+    upload_dir = os.path.join('users', user_id, 'uploads')
+    final_dir = os.path.join('users', user_id, 'finaloutput')
+
     try:
         # 1) Save uploaded files into a temp per-user directory
         batch_dir = os.path.join('users', user_id, 'batch_temp')
@@ -1101,6 +1156,13 @@ def batch_detect():
 
         # 3) Process images one-by-one and collect results
         results = []
+        model_map = {
+            'SGN': 'snapshots/SGN_best.pt',
+            'MADM': 'snapshots/MADM_v3.pt',
+            'CD3': 'snapshots/cd3_v3.pt'
+        }
+        active_model = model_path or model_map.get(detection_type)
+
         for fname in sorted(os.listdir(batch_dir)):
             if fname == 'custom_model.pt':
                 continue
@@ -1110,10 +1172,57 @@ def batch_detect():
             if not fname.lower().endswith(('.tif', '.tiff', '.png', '.jpg', '.jpeg')):
                 continue
 
-            res = batch_process_image_yolo(user_id, input_path, detection_type, threshold, model_path=model_path, cell_diameter=cell_diameter)
-            # add original filename for diagnostics
-            res['original_filename'] = fname
-            results.append(res)
+            try:
+                # 1. Preprocess: handles 16-bit to 8-bit normalization and physical scaling
+                prep_data = preprocess_image(input_path, upload_dir, detection_type, cell_diameter)
+                
+                # 2. SAHI Detection: replaces the split/detect/merge subprocesses
+                final_annotation = detect_to_yolo(
+                    image_path=prep_data['path'],
+                    model_path=active_model,
+                    image_width=prep_data['det_w'],
+                    image_height=prep_data['det_h'],
+                    threshold=threshold
+                )
+
+                # 3. Create the final "Safe" TIFF (Scaled but NOT normalized)
+                base_name = os.path.splitext(fname)[0]
+                out_uuid = uuid.uuid4().hex[:8]
+                out_base = f"{base_name}_scaled_{int(cell_diameter)}_{out_uuid}"
+                
+                final_img_path = os.path.join(final_dir, out_base + ".png")
+                final_txt_path = os.path.join(final_dir, out_base + ".txt")
+
+                import shutil
+                if os.path.exists(prep_data['path']):
+                    shutil.move(prep_data['path'], final_img_path)
+
+                with open(final_txt_path, 'w') as f:
+                    f.write(final_annotation)
+
+                # Clean up the temporary normalized detection PNG
+                if os.path.exists(prep_data['path']):
+                    os.remove(prep_data['path'])
+
+                results.append({
+                    'success': True,
+                    'original_filename': fname,
+                    'tiff_path': final_img_path,
+                    'txt_path': final_txt_path,
+                    'det_width': prep_data['det_w'],
+                    'det_height': prep_data['det_h']
+                })
+
+            except Exception as e:
+                results.append({
+                    'success': False,
+                    'original_filename': fname,
+                    'error': str(e)
+                })
+            # res = batch_process_image_yolo(user_id, input_path, detection_type, threshold, model_path=model_path, cell_diameter=cell_diameter)
+            # # add original filename for diagnostics
+            # res['original_filename'] = fname
+            # results.append(res)
 
         # 4) Build ZIP with exact pairs: tiff + matching .txt (or an error file for failures)
         zip_buffer = io.BytesIO()
@@ -1166,6 +1275,28 @@ def serve_snapshot(filename):
     user_id = session['user_id']
     snapshot_dir = os.path.join('users', user_id, 'snapshots')
     return send_from_directory(snapshot_dir, filename)
+
+@app.route('/api/preview/<filename>')
+def serve_thumbnail(filename):
+    user_id = session['user_id']
+    
+    directory = os.path.join('users', str(user_id), 'thumbnails')
+    
+    print(f"Looking for thumbnail in: {directory}/{filename}") # Debug print
+    
+    return send_from_directory(directory, filename)
+
+@app.route('/api/images/<filename>')
+def serve_original_image(filename):
+    user_id = session.get('user_id')
+    directory = os.path.join('users', user_id, 'saved_data')
+    return send_from_directory(directory, filename)
+
+@app.route('/api/annotations/<filename>')
+def serve_annotation_file(filename):
+    user_id = session.get('user_id')
+    directory = os.path.join('users', user_id, 'saved_annotations')
+    return send_from_directory(directory, filename)
 
 
 from flask import jsonify, session
