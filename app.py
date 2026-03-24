@@ -323,7 +323,9 @@ def upload_file():
         output_filename = f"{unique_id}.png"
         output_path = os.path.join(user_converted_dir, output_filename)
         
-        normalize_image(original_path, output_path)
+        p_low, p_high = normalize_image(original_path, output_path)
+        session['norm_p_low'] = float(p_low) if p_low is not None else None
+        session['norm_p_high'] = float(p_high) if p_high is not None else None
 
         return jsonify({
             'converted_url': f'/converted/{output_filename}',
@@ -400,7 +402,9 @@ def upload_cropped_file():
         output_filename = f"{unique_id}.png"
         output_path = os.path.join(user_convert_dir, output_filename)
         
-        normalize_image(upload_path, output_path)
+        p_low = session.get('norm_p_low')
+        p_high = session.get('norm_p_high')
+        normalize_image(upload_path, output_path, p_low=p_low, p_high=p_high)
 
         return jsonify({
             'converted_url': f'/converted/{output_filename}',
