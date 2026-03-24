@@ -1,3 +1,4 @@
+import { rgbToHex } from '@mui/material'
 import { useRef, useState, useEffect } from 'react'
 
 export default function ImageCanvas({ src, boxes, onAddBox, onRemoveBox, isCropping,
@@ -10,6 +11,15 @@ export default function ImageCanvas({ src, boxes, onAddBox, onRemoveBox, isCropp
   const [isPanning, setIsPanning] = useState(false)
   const [lastPan, setLastPan] = useState({ x: 0, y: 0 })
 
+  const [boundaries, setboundaries] = useState({
+    xMin: 0,
+    xMax: 0,
+    yMin: 0,
+    yMax: 0
+  })
+
+  const [isNewImage, setIsNewImage] = useState(true)
+
   const [windowSize, setWindowSize] = useState({
     width: window.innerWidth,
     height: window.innerHeight
@@ -21,10 +31,15 @@ export default function ImageCanvas({ src, boxes, onAddBox, onRemoveBox, isCropp
 
   // load image
   useEffect(() => {
+    console.log("oh boy what a day")
     const img = new Image()
     img.src = src
     img.onload = () => {
       imgRef.current = img
+      if (isNewImage) {
+        setboundaries({xMin: 0, xMax: img.width, yMin: 0, yMax: img.height})
+      }
+      setIsNewImage(true)
       draw()
     }
   }, [src])
@@ -48,6 +63,7 @@ export default function ImageCanvas({ src, boxes, onAddBox, onRemoveBox, isCropp
   }, [scale, offset, boxes, currentBox, classes, brightness, contrast, windowSize])
 
   const draw = () => {
+    console.log(boundaries)
     const canvas = canvasRef.current
     if (!canvas || !imgRef.current) return
     const ctx = canvas.getContext('2d')
@@ -142,7 +158,7 @@ export default function ImageCanvas({ src, boxes, onAddBox, onRemoveBox, isCropp
       e.clientY - rect.top
     ));
 
-    if (x < 0 || x > imageSize.width || y < 0 || y > imageSize.height) {
+    if (x < boundaries.xMin || x > boundaries.xMax || y < boundaries.yMin || y > boundaries.yMax) {
       setCanDraw(false)
     } else {
       setCanDraw(true)
@@ -150,16 +166,16 @@ export default function ImageCanvas({ src, boxes, onAddBox, onRemoveBox, isCropp
 
     if (currentBox) {
       // Don't allow user to draw outside of the image
-      if (x < 0) {
-        x = 0
-      } else if (x > imageSize.width) {
-        x = imageSize.width
+      if (x < boundaries.xMin) {
+        x = boundaries.xMin
+      } else if (x > boundaries.xMax) {
+        x = boundaries.xMax
       }
 
-      if (y < 0) {
-        y = 0
-      } else if (y > imageSize.height) {
-        y = imageSize.height
+      if (y < boundaries.yMin) {
+        y = boundaries.yMin
+      } else if (y > boundaries.yMax) {
+        y = boundaries.yMax
       }
 
       setCurrentBox((b) => ({
@@ -187,6 +203,15 @@ export default function ImageCanvas({ src, boxes, onAddBox, onRemoveBox, isCropp
       currentBox.class = currentClass
       if (isCropping) {
         onCrop(currentBox)
+        console.log(currentBox)
+        setboundaries({
+          xMin: currentBox.x,
+          xMax: currentBox.x + currentBox.w,
+          yMin: currentBox.y,
+          yMax: currentBox.y + currentBox.h
+        })
+        console.log(boundaries)
+        setIsNewImage(false)
         setCurrentBox(null)
         return
       }
@@ -220,6 +245,7 @@ export default function ImageCanvas({ src, boxes, onAddBox, onRemoveBox, isCropp
       height={window.innerHeight}
       style={{
         cursor: isPanning ? 'grabbing': canDraw ? 'crosshair': 'not-allowed',
+        background: 'rgba(0, 0, 0, 1)',
       }}
       onMouseDown={handleMouseDown}
       onMouseMove={handleMouseMove}
