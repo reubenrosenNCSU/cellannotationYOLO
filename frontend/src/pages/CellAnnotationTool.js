@@ -8,6 +8,7 @@ import Stack from '@mui/material/Stack'
 import TextField from '@mui/material/TextField'
 import DownloadIcon from '@mui/icons-material/Download'
 import Tooltip from '@mui/material/Tooltip'
+import CircularProgress from '@mui/material/CircularProgress'
 
 import SideMenu from '../components/SideMenu'
 import ImageCanvas from '../components/ImageCanvas'
@@ -20,6 +21,8 @@ import CellCalibrator from '../components/CellCalibrator'
 export default function CellAnnotationTool() {
   // Base URL for the backend API
   const API_BASE_URL = 'http://10.80.24.12:5001'
+
+  const [isLoading, setIsLoading] = useState(false)
 
   // State for image operations
   const [imageURL, setImageURL] = useState('')
@@ -110,6 +113,7 @@ export default function CellAnnotationTool() {
     const formData = new FormData()
     formData.append('file', file)
 
+    setIsLoading(true)
     try {
         const res = await fetch('/upload', {
           method: 'POST',
@@ -123,6 +127,8 @@ export default function CellAnnotationTool() {
         setAnnotations([])
     } catch(e) {
       alert('Upload failed: ' + (e.response?.data?.error || e.message))
+    } finally {
+      setIsLoading(false)
     }
   }
 
@@ -421,7 +427,7 @@ export default function CellAnnotationTool() {
       headers['Content-Type'] = 'application/json'
     }
 
-    
+    setIsLoading(true)
     try {
       const res = await fetch(endpoint, {
         method: 'POST',
@@ -459,6 +465,8 @@ export default function CellAnnotationTool() {
       alert(`Detected ${importedCount} ${models[currentModel]} objects!`)
     } catch (e) {
       alert('Detection failed: ' + (e.response?.data?.error || e.message))
+    } finally {
+      setIsLoading(false)
     }
   }
 
@@ -489,6 +497,7 @@ export default function CellAnnotationTool() {
     formData.append('threshold', threshold)
     formData.append('cell_diameter', cellDiameter)
     selectedFiles.forEach(file => formData.append('images', file));
+    setIsLoading(true)
     try {
       const res = await fetch('/batch-detect', {
         method: 'POST',
@@ -514,6 +523,8 @@ export default function CellAnnotationTool() {
     } catch (error) {
       console.error(error);
       alert(`Error: ${error.message}`)
+    } finally {
+      setIsLoading(false)
     }
   }
 
@@ -560,6 +571,7 @@ export default function CellAnnotationTool() {
   }
 
   async function handleFineTuneDetect() {
+    setIsLoading(true)
     try {
       const res = await fetch('/detect-finetuned', {
         method: 'POST',
@@ -603,6 +615,8 @@ export default function CellAnnotationTool() {
       alert(`Detected ${importedCount} ${models[currentModel]} objects!`)
     } catch (e) {
       alert('Fine tuned detection failed: ' + (e.response?.data?.error || e.message))
+    } finally {
+      setIsLoading(false)
     }
   }
 
@@ -686,6 +700,7 @@ export default function CellAnnotationTool() {
     formData.append('epochs', epochs)
     formData.append('num_images', preTrainImages)
 
+    setIsLoading(true)
     fetch('/train-saved', {
       method: 'POST',
       credentials: 'include', 
@@ -704,14 +719,16 @@ export default function CellAnnotationTool() {
       setFineTuneModelURL(resJson.model_url)
     })
     .then(() => {
-      alert('Model fine tuned with saved data.');
+      alert('Model fine tuned with saved data.')
       handleOpenFineTuneDownloadModal()
       handleCloseFineTuneModal()
-  })
-  .catch((err) => {
-      console.error(err);
-      alert('Training failed');
-  });
+    })
+    .catch((err) => {
+        console.error(err);
+        alert('Training failed')
+    }).finally(() => {
+      setIsLoading(false)
+    })
   }
 
   function clearTrainingData() {
@@ -1337,6 +1354,21 @@ export default function CellAnnotationTool() {
 
   return (
     <Box sx={{ display: 'flex', height: '100vh', width: '100vw' }}>
+      {isLoading && (
+        <div style={{
+          position: 'fixed',
+          inset: 0,
+          backgroundColor: 'rgba(0, 0, 0, 0.4)',
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 9999,
+        }}>
+          <CircularProgress size={52} thickness={4} sx={{ color: 'white' }} />
+          <p style={{ color: 'white', marginTop: 12, fontSize: 14 }}>Processing...</p>
+        </div>
+      )}
       <SideMenu anchorSide='left'>
         <Typography gutterBottom variant='h6' fontWeight={'bold'}>
             Cell Annotation Tool (CAT🐱)
