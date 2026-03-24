@@ -27,8 +27,81 @@ from scripts.sahi_detect import detect_to_yolo
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))  # Gets directory where app.py is
 from PIL import Image
 import tifffile
+from flask_sqlalchemy import SQLAlchemy
 # Disable decompression bomb protection for large TIFF files
 Image.MAX_IMAGE_PIXELS = None
+
+
+app = Flask(__name__)
+CORS(app, supports_credentials=True)  # This will allow all domains to access your API
+
+app.secret_key = 'test'  # Replace with a real secret key
+
+app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///biolab.db'
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(hours=24)  # Session expires after 24 hours
+db = SQLAlchemy()
+db.init_app(app)
+
+class User(db.Model):
+    id = db.Column(db.String(36), primary_key=True)
+
+class ImageRecord(db.Model):
+    id = db.Column(db.String(36), primary_key=True)
+    user_id = db.Column(db.String(36), db.ForeignKey('user.id'), nullable=False)
+    original_filename = db.Column(db.String(255))
+    
+    # Paths to the physical files
+    image_path = db.Column(db.String(512)) # The normalized PNG
+    label_path = db.Column(db.String(512)) # The YOLO .txt file
+    
+    created_at = db.Column(db.DateTime, default=datetime.datetime.utcnow)
+
+    # Optional: store dimensions if you need them for scaling later
+    width = db.Column(db.Integer)
+    height = db.Column(db.Integer)
+
+@app.before_request
+def set_user_session():
+    if 'user_id' not in session:
+        session.permanent = True
+        session['user_id'] = str(uuid.uuid4())
+    
+    # Always update directory modification time on any request
+    user_id = session['user_id']
+    try:
+        existing_user = User.query.get(user_id)
+        if not existing_user:
+            new_user = User(id=user_id)
+            db.session.add(new_user)
+            db.session.commit()
+    except Exception as e:
+        db.session.rollback()
+        print(f"Database error in before_request: {e}")
+        
+    user_dir = os.path.join('users', user_id)
+    if os.path.exists(user_dir):
+        os.utime(user_dir, None)  # Update mtime on every request
+    # Create user directories if they don't exist
+    user_id = session['user_id']
+    user_dirs = [
+        os.path.join('users', user_id, 'uploads'),
+        os.path.join('users', user_id, 'converted'),
+        os.path.join('users', user_id, 'saved_data'),
+        os.path.join('users', user_id, 'saved_annotations'),
+        os.path.join('users', user_id, 'finaloutput'),
+        os.path.join('users', user_id, 'ft_upload'),
+        os.path.join('users', user_id, 'images'),
+        os.path.join('users', user_id, 'input'),
+        os.path.join('users', user_id, 'output'),
+        os.path.join('users', user_id, 'output/output_csv'),
+        os.path.join('users', user_id, 'snapshots'),
+        os.path.join('users', user_id, 'yolo_dataset/images'),
+        os.path.join('users', user_id, 'yolo_dataset/labels')
+    ]
+    for dir_path in user_dirs:
+        os.makedirs(dir_path, exist_ok=True)
+
 
 def preprocess_image(image_path, upload_dir, detection_type, cell_diameter):
     """
@@ -169,42 +242,6 @@ def get_scalar_value(v):
             return None
     return None
 
-app = Flask(__name__)
-CORS(app, supports_credentials=True)  # This will allow all domains to access your API
-
-app.secret_key = 'test'  # Replace with a real secret key
-
-
-@app.before_request
-def set_user_session():
-    if 'user_id' not in session:
-        session.permanent = True
-        session['user_id'] = str(uuid.uuid4())
-    
-    # Always update directory modification time on any request
-    user_id = session['user_id']
-    user_dir = os.path.join('users', user_id)
-    if os.path.exists(user_dir):
-        os.utime(user_dir, None)  # Update mtime on every request
-    # Create user directories if they don't exist
-    user_id = session['user_id']
-    user_dirs = [
-        os.path.join('users', user_id, 'uploads'),
-        os.path.join('users', user_id, 'converted'),
-        os.path.join('users', user_id, 'saved_data'),
-        os.path.join('users', user_id, 'saved_annotations'),
-        os.path.join('users', user_id, 'finaloutput'),
-        os.path.join('users', user_id, 'ft_upload'),
-        os.path.join('users', user_id, 'images'),
-        os.path.join('users', user_id, 'input'),
-        os.path.join('users', user_id, 'output'),
-        os.path.join('users', user_id, 'output/output_csv'),
-        os.path.join('users', user_id, 'snapshots')
-    ]
-    for dir_path in user_dirs:
-        os.makedirs(dir_path, exist_ok=True)
-
-app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(hours=24)  # Session expires after 24 hours
 
 @app.route('/cleanup', methods=['POST'])
 def cleanup_files():
@@ -391,6 +428,11 @@ def save_training_data():
     try:
         # Generate unique ID
         unique_id = str(uuid.uuid4())
+
+        img_filename = f"{unique_id}.png"
+        lbl_filename = f"{unique_id}.txt"
+        final_img_path = os.path.join('users', user_id, 'images', img_filename)
+        final_lbl_path = os.path.join('users', user_id, 'snapshots', lbl_filename)
         
         # Get parameters from JSON
         data = request.get_json()
@@ -1376,4 +1418,8 @@ atexit.register(lambda: scheduler.shutdown())
 
 
 if __name__ == '__main__':
+    print('starting application')
+    with app.app_context():
+        db.create_all()
+        print("Database initialized")
     app.run(host='0.0.0.0', port=5001, debug=True)
