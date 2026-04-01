@@ -3,3 +3,4 @@ snapshots/SGN_best.pt
 __pycache__/
 users
 runs
+instance/biolab.db

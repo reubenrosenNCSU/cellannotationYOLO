@@ -426,6 +426,25 @@ def serve_converted(filename):
     converted_dir = os.path.join('users', user_id, 'converted')
     return send_from_directory(converted_dir, filename)
 
+@app.route('/tile/<filename>/<int:tx>/<int:ty>/<int:tile_size>')
+def serve_tile(filename, tx, ty, tile_size):
+    user_id = session['user_id']
+    filename = secure_filename(filename)
+    path = os.path.join('users', user_id, 'converted', filename)
+    if not os.path.exists(path):
+        return jsonify({'error': 'File not found'}), 404
+    x = tx * tile_size
+    y = ty * tile_size
+    with Image.open(path) as img:
+        w, h = img.size
+        if x >= w or y >= h:
+            return jsonify({'error': 'Tile out of bounds'}), 400
+        tile = img.crop((x, y, min(x + tile_size, w), min(y + tile_size, h)))
+    buf = io.BytesIO()
+    tile.save(buf, 'PNG')
+    buf.seek(0)
+    return send_file(buf, mimetype='image/png')
+
 @app.route('/save-training-data', methods=['POST'])
 def save_training_data():
     user_id = session['user_id']
@@ -1426,4 +1445,4 @@ if __name__ == '__main__':
     with app.app_context():
         db.create_all()
         print("Database initialized")
-    app.run(host='0.0.0.0', port=5001, debug=True)
+    app.run(host='0.0.0.0', port=5002, debug=True)

@@ -1,10 +1,15 @@
 import { rgbToHex } from '@mui/material'
 import { useRef, useState, useEffect } from 'react'
 
+const TILE_SIZE = 2048
+const LARGE_IMAGE_THRESHOLD = 16000
+const MAX_VISIBLE_TILES = 36
+
 export default function ImageCanvas({ src, boxes, onAddBox, onRemoveBox, isCropping,
     onCrop, currentClass, classes, imageSize, brightness, contrast, scale, onScaleChange }) {
   const canvasRef = useRef(null)
   const imgRef = useRef(null)
+  const tilesRef = useRef({})
 
   // pan + zoom state
   const [offset, setOffset] = useState({ x: 0, y: 0 })
@@ -28,20 +33,43 @@ export default function ImageCanvas({ src, boxes, onAddBox, onRemoveBox, isCropp
   // box drawing state
   const [currentBox, setCurrentBox] = useState(null)
   const [canDraw, setCanDraw] = useState(false)
+  const [tileVersion, setTileVersion] = useState(0)
+
+  const isTiled = imageSize && (imageSize.width > LARGE_IMAGE_THRESHOLD || imageSize.height > LARGE_IMAGE_THRESHOLD)
 
   // load image
   useEffect(() => {
-    console.log("oh boy what a day")
+    tilesRef.current = {}
+    imgRef.current = null
+
+    if (!src) return
+
+    if (isTiled) {
+      if (isNewImage) {
+        setboundaries({ xMin: 0, xMax: imageSize.width, yMin: 0, yMax: imageSize.height })
+      }
+      setIsNewImage(true)
+      return
+    }
+
     const img = new Image()
-    img.src = src
     img.onload = () => {
+      console.log('naturalWidth:', img.naturalWidth)
+      console.log('naturalHeight:', img.naturalHeight)
+      console.log('complete:', img.complete)
       imgRef.current = img
       if (isNewImage) {
         setboundaries({xMin: 0, xMax: img.width, yMin: 0, yMax: img.height})
       }
       setIsNewImage(true)
-      draw()
     }
+
+    img.onerror = () => {
+      console.error('Failed to load image:', src)
+      alert('Image failed to load. The file may be too large for the browser to render.')
+    }
+
+    img.src = src
   }, [src])
 
   // Track window size for rendering
@@ -60,12 +88,11 @@ export default function ImageCanvas({ src, boxes, onAddBox, onRemoveBox, isCropp
   // draw loop
   useEffect(() => {
     draw()
-  }, [scale, offset, boxes, currentBox, classes, brightness, contrast, windowSize])
+  }, [scale, offset, boxes, currentBox, classes, brightness, contrast, windowSize, tileVersion])
 
   const draw = () => {
-    console.log(boundaries)
     const canvas = canvasRef.current
-    if (!canvas || !imgRef.current) return
+    if (!canvas) return
     const ctx = canvas.getContext('2d')
 
     ctx.clearRect(0, 0, canvas.width, canvas.height)
@@ -78,8 +105,54 @@ export default function ImageCanvas({ src, boxes, onAddBox, onRemoveBox, isCropp
     // apply filters
     ctx.filter = `brightness(${100 + +brightness}%) contrast(${100 + +contrast}%)`
 
-    // draw image
-    ctx.drawImage(imgRef.current, 0, 0)
+    if (isTiled) {
+      const visX0 = Math.max(0, -offset.x / scale)
+      const visY0 = Math.max(0, -offset.y / scale)
+      const visX1 = Math.min(imageSize.width, (canvas.width - offset.x) / scale)
+      const visY1 = Math.min(imageSize.height, (canvas.height - offset.y) / scale)
+
+      const txMin = Math.floor(visX0 / TILE_SIZE)
+      const txMax = Math.ceil(visX1 / TILE_SIZE)
+      const tyMin = Math.floor(visY0 / TILE_SIZE)
+      const tyMax = Math.ceil(visY1 / TILE_SIZE)
+      const tileCount = (txMax - txMin) * (tyMax - tyMin)
+
+      if (tileCount > MAX_VISIBLE_TILES) {
+        ctx.restore()
+        ctx.fillStyle = 'white'
+        ctx.font = '20px sans-serif'
+        ctx.textAlign = 'center'
+        ctx.fillText('Zoom in to view image', canvas.width / 2, canvas.height / 2)
+        return
+      }
+
+      const filename = src.split('/').pop()
+
+      for (let ty = tyMin; ty < tyMax; ty++) {
+        for (let tx = txMin; tx < txMax; tx++) {
+          const key = `${tx}_${ty}`
+          const cached = tilesRef.current[key]
+          if (!cached) {
+            tilesRef.current[key] = 'loading'
+            const img = new Image()
+            img.onload = () => {
+              tilesRef.current[key] = img
+              setTileVersion(v => v + 1)
+            }
+            img.onerror = () => { tilesRef.current[key] = 'error' }
+            img.src = `/tile/${filename}/${tx}/${ty}/${TILE_SIZE}`
+          } else if (cached !== 'loading' && cached !== 'error') {
+            ctx.drawImage(cached, tx * TILE_SIZE, ty * TILE_SIZE)
+          }
+        }
+      }
+    } else {
+      if (!imgRef.current) {
+        ctx.restore()
+        return
+      }
+      ctx.drawImage(imgRef.current, 0, 0)
+    }
 
     ctx.filter = 'none'
     // draw existing boxes
