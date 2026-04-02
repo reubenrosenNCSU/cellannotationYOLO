@@ -24,6 +24,7 @@ export default function ImageCanvas({ src, boxes, onAddBox, onRemoveBox, isCropp
   })
 
   const [isNewImage, setIsNewImage] = useState(true)
+  const [imageLoaded, setImageLoaded] = useState(false)
 
   const [windowSize, setWindowSize] = useState({
     width: window.innerWidth,
@@ -41,6 +42,7 @@ export default function ImageCanvas({ src, boxes, onAddBox, onRemoveBox, isCropp
   useEffect(() => {
     tilesRef.current = {}
     imgRef.current = null
+    setImageLoaded(false)
 
     if (!src) return
 
@@ -49,6 +51,7 @@ export default function ImageCanvas({ src, boxes, onAddBox, onRemoveBox, isCropp
         setboundaries({ xMin: 0, xMax: imageSize.width, yMin: 0, yMax: imageSize.height })
       }
       setIsNewImage(true)
+      setImageLoaded(true)
       return
     }
 
@@ -62,6 +65,7 @@ export default function ImageCanvas({ src, boxes, onAddBox, onRemoveBox, isCropp
         setboundaries({xMin: 0, xMax: img.width, yMin: 0, yMax: img.height})
       }
       setIsNewImage(true)
+      setImageLoaded(true)
     }
 
     img.onerror = () => {
@@ -88,7 +92,7 @@ export default function ImageCanvas({ src, boxes, onAddBox, onRemoveBox, isCropp
   // draw loop
   useEffect(() => {
     draw()
-  }, [scale, offset, boxes, currentBox, classes, brightness, contrast, windowSize, tileVersion])
+  }, [scale, offset, boxes, currentBox, classes, brightness, contrast, windowSize, imageLoaded, tileVersion])
 
   const draw = () => {
     const canvas = canvasRef.current
