@@ -103,7 +103,7 @@ def set_user_session():
         os.makedirs(dir_path, exist_ok=True)
 
 
-def preprocess_image(image_path, upload_dir, detection_type, cell_diameter):
+def preprocess_image(image_path, upload_dir, detection_type, cell_diameter, p_low=None, p_high=None):
     """
     Standardizes any input image (TIFF/PNG/JPG) for the YOLO model.
     Returns: (path_to_detection_image, det_w, det_h, scaling_factor)
@@ -111,10 +111,10 @@ def preprocess_image(image_path, upload_dir, detection_type, cell_diameter):
     # 1. Generate unique IDs to prevent race conditions
     img_uuid = uuid.uuid4().hex[:8]
     base_name = os.path.splitext(os.path.basename(image_path))[0]
-    
+
     # 2. Normalize (Detection-only copy)
     normalized_path = os.path.join(upload_dir, f"norm_{img_uuid}_{base_name}.png")
-    normalize_image(image_path, normalized_path)
+    normalize_image(image_path, normalized_path, p_low=p_low, p_high=p_high)
 
     # 3. Calculate Scaling
     target_diameter = 20.0 if detection_type == 'CD3' else 34.0
@@ -691,7 +691,8 @@ def detect_madm():
         image_path = os.path.join(upload_dir, files[0])
         model_path = 'snapshots/MADM_v3.pt'
 
-        prep_data = preprocess_image(image_path, upload_dir, 'MADM', cell_diameter)
+        prep_data = preprocess_image(image_path, upload_dir, 'MADM', cell_diameter,
+                                     p_low=session.get('norm_p_low'), p_high=session.get('norm_p_high'))
 
         with Image.open(image_path) as img:
             image_width, image_height = img.size
@@ -736,7 +737,8 @@ def detect_sgn():
 
         image_path = os.path.join(upload_dir, files[0])
 
-        prep_data = preprocess_image(image_path, upload_dir, 'SGN', cell_diameter)
+        prep_data = preprocess_image(image_path, upload_dir, 'SGN', cell_diameter,
+                                     p_low=session.get('norm_p_low'), p_high=session.get('norm_p_high'))
 
         with Image.open(image_path) as img:
             image_width, image_height = img.size
@@ -778,7 +780,8 @@ def detect_cd3():
 
         image_path = os.path.join(upload_dir, files[0])
 
-        prep_data = preprocess_image(image_path, upload_dir, 'CD3', cell_diameter)
+        prep_data = preprocess_image(image_path, upload_dir, 'CD3', cell_diameter,
+                                     p_low=session.get('norm_p_low'), p_high=session.get('norm_p_high'))
 
         with Image.open(image_path) as img:
             image_width, image_height = img.size
@@ -1074,8 +1077,9 @@ def detect_custom():
             return jsonify({'error': 'No image found in uploads.'}), 400
         image_path = os.path.join(upload_dir, files[0])
 
-        prep_data = preprocess_image(image_path, upload_dir, 'SGN', cell_diameter)
-        
+        prep_data = preprocess_image(image_path, upload_dir, 'SGN', cell_diameter,
+                                     p_low=session.get('norm_p_low'), p_high=session.get('norm_p_high'))
+
         with Image.open(image_path) as img:
             orig_w, orig_h = img.size
         
