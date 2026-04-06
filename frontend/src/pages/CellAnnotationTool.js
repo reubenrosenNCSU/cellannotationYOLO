@@ -273,49 +273,40 @@ export default function CellAnnotationTool() {
       const centerY = (ann.y + ann.h / 2) / imageHeight
       const width = ann.w / imageWidth
       const height = ann.h / imageHeight
-        
+
       return `${ann.class} ${centerX.toFixed(6)} ${centerY.toFixed(6)} ${width.toFixed(6)} ${height.toFixed(6)}`
     }).join('\n')
 
-    fetch('/export-annotations', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      credentials: 'include', 
-      body: JSON.stringify({
-        yolo_data: yoloData,
-        original_filename: filename,
-      }),
-    })
-    .then(async (res) => {
+    try {
+      const res = await fetch('/export-annotations', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        credentials: 'include',
+        body: JSON.stringify({
+          yolo_data: yoloData,
+          original_filename: filename,
+        }),
+      })
       if (!res.ok) {
         const errorData = await res.json().catch(() => ({}))
         throw new Error(errorData.error || `HTTP error! status: ${res.status}`)
       }
-      return res.blob() // Convert the response stream to a Blob
-    })
-    .then((blob) => {
-      // Ensure the blob has the correct type
+      const blob = await res.blob()
       const zipBlob = new Blob([blob], { type: 'application/zip' })
-      
-      // Create download link
       const downloadUrl = window.URL.createObjectURL(zipBlob)
       const link = document.createElement('a')
-
       link.href = downloadUrl
       link.setAttribute('download', `${imageName}_export.zip`)
       document.body.appendChild(link)
       link.click()
-
-      // Cleanup
       window.URL.revokeObjectURL(downloadUrl)
       link.remove()
-    })
-    .catch((error) => {
+    } catch (error) {
       console.error('Export error:', error)
       alert(`Export failed: ${error.message}`)
-    })
+    }
   }
 
   function importAnnotations(e) {
@@ -622,7 +613,7 @@ export default function CellAnnotationTool() {
 
   // *----------* Training Operations *----------* \\
 
-  function saveTrainingData() {
+  async function saveTrainingData() {
     // Normalize annotations
     const normalizedAnnotations = annotations.map(ann => {
       const x_center = parseFloat(((ann.x + ann.w / 2) / imageSize.width).toFixed(6));
@@ -639,48 +630,46 @@ export default function CellAnnotationTool() {
         y_center,
         width_norm,
         height_norm,
-        class_name 
+        class_name
       }
     })
-    
-    fetch('/save-training-data', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      credentials: 'include', 
-      body: JSON.stringify({
-        original_filename: imageName,
-        annotations: normalizedAnnotations,
-        brightness: brightness,
-        contrast: contrast,
-      }),
-    })
-    .then(async (res) => {
+
+    try {
+      const res = await fetch('/save-training-data', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        credentials: 'include',
+        body: JSON.stringify({
+          original_filename: imageName,
+          annotations: normalizedAnnotations,
+          brightness: brightness,
+          contrast: contrast,
+        }),
+      })
       if (!res.ok) {
         const errorData = await res.json().catch(() => ({}))
         throw new Error(errorData.error || `HTTP error! status: ${res.status}`)
       }
-
-      return res.json()
-    })
-    .then((data) => {
+      const data = await res.json()
       console.log('Success from Server:', data)
-
       const newEntry = {
         imageName: data.image_file,
         annotationName: data.annotation_file,
         thumbnailUrl: `/api/preview/${data.thumbnail_file}`,
         count: data.annotation_count
       }
-
       setTrainingData((prevData) => [...prevData, newEntry])
       console.log(trainingData)
       alert('Training data saved!')
-    })
+    } catch (error) {
+      console.error('Save failed:', error)
+      alert(`Save failed: ${error.message}`)
+    }
   }
 
-  function fineTune() {
+  async function fineTune() {
     if (!epochs || epochs < 1) {
       alert('Please enter valid number of epochs!')
       return
@@ -701,74 +690,71 @@ export default function CellAnnotationTool() {
     formData.append('num_images', preTrainImages)
 
     setIsLoading(true)
-    fetch('/train-saved', {
-      method: 'POST',
-      credentials: 'include', 
-      body: formData
-    })
-    .then(async (res) => {
+    try {
+      const res = await fetch('/train-saved', {
+        method: 'POST',
+        credentials: 'include',
+        body: formData
+      })
       if (!res.ok) {
         const errorData = await res.json().catch(() => ({}))
         throw new Error(errorData.error || `HTTP error! status: ${res.status}`)
       }
-
       const resJson = await res.json()
       console.log(resJson.kfold_results)
       console.log(resJson.model_url)
       setKFoldResults(resJson.kfold_results)
       setFineTuneModelURL(resJson.model_url)
-    })
-    .then(() => {
       alert('Model fine tuned with saved data.')
       handleOpenFineTuneDownloadModal()
       handleCloseFineTuneModal()
-    })
-    .catch((err) => {
-        console.error(err);
-        alert('Training failed')
-    }).finally(() => {
+    } catch (err) {
+      console.error(err)
+      alert('Training failed')
+    } finally {
       setIsLoading(false)
-    })
+    }
   }
 
-  function clearTrainingData() {
+  async function clearTrainingData() {
     const confirm = window.confirm('Are you sure you want to delete all training data? This cannot be undone!')
-      if (!confirm) return
+    if (!confirm) return
 
-    fetch('/clear-training-data', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      credentials: 'include', 
-    })
-    .then(async (res) => {
+    try {
+      const res = await fetch('/clear-training-data', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        credentials: 'include',
+      })
       if (!res.ok) {
         const errorData = await res.json().catch(() => ({}))
         throw new Error(errorData.error || `HTTP error! status: ${res.status}`)
       }
-    })
-    .then(
-      alert('All training data has been cleared!'),
+      alert('All training data has been cleared!')
       setTrainingData([])
-    )
+    } catch (error) {
+      console.error(error)
+      alert(`Clear failed: ${error.message}`)
+    }
   }
 
-  const deleteTrainingDataEntry = (uniqueId) => {
+  const deleteTrainingDataEntry = async (uniqueId) => {
     if (!window.confirm("Are you sure you want to delete this training sample?")) return
 
-    fetch(`/delete-training-data/${uniqueId}`, {
-      method: 'DELETE',
-    })
-    .then(res => {
+    try {
+      const res = await fetch(`/delete-training-data/${uniqueId}`, {
+        method: 'DELETE',
+      })
       if (res.ok) {
-        // Remove from local state so the UI updates
         setTrainingData(prev => prev.filter(item => !item.annotationName.includes(uniqueId)))
       } else {
-        alert("Failed to delete from server.");
+        alert("Failed to delete from server.")
       }
-    })
-    .catch(err => console.error("Delete error:", err));
+    } catch (err) {
+      console.error("Delete error:", err)
+    }
   }
 
   const loadSavedEntry = async (item) => {
@@ -895,20 +881,21 @@ export default function CellAnnotationTool() {
     }
   }
 
-  function getMetrics() {
-    fetch('/events-data', {
-      method: 'GET'
-    })
-    .then(async (res) => {
+  async function getMetrics() {
+    try {
+      const res = await fetch('/events-data', {
+        method: 'GET'
+      })
       if (!res.ok) {
         const errorData = await res.json().catch(() => ({}))
         throw new Error(errorData.error || `HTTP error! status: ${res.status}`)
       }
-
       const resJson = await res.json()
       console.log(resJson)
       setMetricsData(resJson)
-    })
+    } catch (error) {
+      console.error(error)
+    }
   }
 
   // *----------* Tab Menu Contents *----------* \\
