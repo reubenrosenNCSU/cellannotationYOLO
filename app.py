@@ -11,6 +11,7 @@ from PIL import Image, ImageOps
 import numpy as np
 import zipfile
 import io
+import tempfile
 import gc  # Garbage collector
 import time  # For delays
 from flask import session
@@ -416,7 +417,41 @@ def upload_cropped_file():
     except Exception as e:
         print(f"Error in upload-cropped: {str(e)}")
         return jsonify({'error': f"Server error: {str(e)}"}), 500
-    
+
+
+@app.route('/preview-tiff', methods=['POST'])
+def preview_tiff():
+    tmp_in_path = None
+    tmp_out_path = None
+    try:
+        file = request.files.get('file')
+        if not file:
+            return jsonify({'error': 'No file provided'}), 400
+
+        with tempfile.NamedTemporaryFile(suffix='.tiff', delete=False) as tmp_in:
+            file.save(tmp_in.name)
+            tmp_in_path = tmp_in.name
+
+        with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as tmp_out:
+            tmp_out_path = tmp_out.name
+
+        normalize_image(tmp_in_path, tmp_out_path)
+
+        with open(tmp_out_path, 'rb') as f:
+            buf = io.BytesIO(f.read())
+
+        return send_file(buf, mimetype='image/png')
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+    finally:
+        if tmp_in_path and os.path.exists(tmp_in_path):
+            os.remove(tmp_in_path)
+        if tmp_out_path and os.path.exists(tmp_out_path):
+            os.remove(tmp_out_path)
+
+
 from scripts.detect_tiles import detect_tiles_in_batch
 
 

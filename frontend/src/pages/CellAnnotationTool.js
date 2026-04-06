@@ -67,6 +67,9 @@ export default function CellAnnotationTool() {
   const [lastCustomModelName, setLastCustomModelName] = useState('')
   // State for batch detection
   const [selectedFiles, setSelectedFiles] = useState([])
+  const [batchThumbnails, setBatchThumbnails] = useState({})
+
+  const fileKey = (file) => `${file.name}-${file.size}-${file.lastModified}`
   // State for fine tuning
   const [fineTuneModels] = useState(['SGN', 'MADM'])
   const [currentFineTuneModel, setCurrentFineTuneModel] = useState(0)
@@ -133,15 +136,30 @@ export default function CellAnnotationTool() {
   }
 
   // Adds images selected by the user to the group to be used for batch detection
-  function addToBatch(e) {
-    const files = e.target.files;
+  async function addToBatch(e) {
+    const files = e.target.files
+    if (!files || files.length === 0) return
+    const newFiles = Array.from(files)
+    setSelectedFiles(prev => [...prev, ...newFiles])
+    e.target.value = ''
 
-    if (files && files.length > 0) {
-      const newFiles = Array.from(files);
-      setSelectedFiles((prevFiles) => [...prevFiles, ...newFiles]);
+    for (const file of newFiles) {
+      const formData = new FormData()
+      formData.append('file', file)
+      try {
+        const res = await fetch('/preview-tiff', {
+          method: 'POST',
+          body: formData,
+          credentials: 'include',
+        })
+        if (!res.ok) throw new Error('Preview failed')
+        const blob = await res.blob()
+        const url = URL.createObjectURL(blob)
+        setBatchThumbnails(prev => ({ ...prev, [fileKey(file)]: url }))
+      } catch (err) {
+        console.error(`Failed to generate preview for ${file.name}:`, err)
+      }
     }
-
-    e.target.value = '';
   }
 
   function handleSave() {
@@ -508,7 +526,6 @@ export default function CellAnnotationTool() {
       document.body.removeChild(a);
       window.URL.revokeObjectURL(url);
 
-      handleCloseBatchModal()
       setSelectedFiles([])
 
     } catch (error) {
@@ -740,6 +757,20 @@ export default function CellAnnotationTool() {
     }
   }
 
+  const removeFromBatch = (index) => {
+    const file = selectedFiles[index]
+    const key = fileKey(file)
+    setBatchThumbnails(prev => {
+      const updated = { ...prev }
+      if (updated[key]) {
+        URL.revokeObjectURL(updated[key])
+        delete updated[key]
+      }
+      return updated
+    })
+    setSelectedFiles(prev => prev.filter((_, i) => i !== index))
+  }
+
   const deleteTrainingDataEntry = async (uniqueId) => {
     if (!window.confirm("Are you sure you want to delete this training sample?")) return
 
@@ -900,14 +931,6 @@ export default function CellAnnotationTool() {
 
   // *----------* Tab Menu Contents *----------* \\
 
-  // Batch detect modal state
-  const [batchModalOpen, setBatchModalOpen] = useState(false)
-  const handleOpenBatchModal = () => {
-    setBatchModalOpen(true)
-  }
-  const handleCloseBatchModal = () => {
-    setBatchModalOpen(false)
-  }
 
   // Custom model upload modal state
   const [customUploadModalOpen, setCustomUploadModalOpen] = useState(false)
@@ -1265,48 +1288,9 @@ export default function CellAnnotationTool() {
               </Box>
             </Box>
           </Box>
-          <Box display='flex' flexDirection='row'>
-            <Button variant='contained' component='label' onClick={detect} sx={{...button_style_span, mr: 1}}>
-              Single Detect
-            </Button>
-            <Button variant='contained' component='label' onClick={handleOpenBatchModal} sx={{...button_style_span, ml: 1}}>
-              Batch Detect
-            </Button>
-            <Modal
-              open={batchModalOpen}
-              onClose={handleCloseBatchModal}
-            >
-              <Box sx={{...modal_style}}>
-                <Typography>Batch Detect</Typography>
-                <PopupState variant='popover' popupId='model-popup-menu'>
-                  {(popupState) => (
-                    <Fragment>
-                      <Button variant='contained' {...bindTrigger(popupState)} endIcon={<KeyboardArrowDownIcon />}>
-                        {models[currentModel]}
-                      </Button>
-                      <Menu {...bindMenu(popupState)}>
-                        {models.map((item, index) => (
-                          <MenuItem 
-                            key={index}
-                            onClick={() => {setCurrentModel(index)}}
-                          >
-                              <Typography variant='body1'>{item}</Typography>
-                          </MenuItem>
-                        ))}
-                      </Menu>
-                    </Fragment>
-                  )}
-                </PopupState>
-                <Button variant='contained' component='label'>
-                  Load Images
-                  <input hidden type='file' multiple accept='image/tiff' onChange={addToBatch} />
-                </Button>
-                <Typography>{selectedFiles.length} files selected</Typography>
-                <Button onClick={handleBatchDetect}>Process</Button>
-                <Button onClick={handleCloseBatchModal}>Cancel</Button>
-              </Box>
-            </Modal>
-          </Box>
+          <Button variant='contained' component='label' onClick={detect} sx={{...button_style_span}}>
+            Single Detect
+          </Button>
           <Box sx={{pt: 1, borderTop: 1, borderColor: 'grey.500'}}>
             <Typography variant='body1' sx={{ fontWeight: 'bold' }}>
               Fine Tuned Detection
@@ -1338,6 +1322,138 @@ export default function CellAnnotationTool() {
       )
 		}
 	]
+
+  const dataTabs = [
+    {
+      label: 'Training',
+      content: (
+        <Box>
+          <Typography>Saved Training Data</Typography>
+          <Button 
+            variant="contained" 
+            color="primary"
+            onClick={handleTrainingDataDownload}
+            sx={{ mt: 2 }} // 'mt: 2' is MUI shorthand for marginTop: 16px
+            startIcon={<DownloadIcon />} // Optional: adds a nice download icon
+          >
+            Download Training Data (.zip)
+          </Button>
+          {trainingData.map((item, index) => {
+            const uniqueId = item.annotationName.replace('.txt', '')
+
+            return (
+              <Box key={index} sx={{ textAlign: 'center' }}>
+                <Box
+                  component="img"
+                  src={item.thumbnailUrl} // Matches your newEntry key
+                  alt="preview"
+                  onClick={() => loadSavedEntry(item)}
+                  sx={{
+                    width: 150,
+                    height: 150,
+                    border: '1px solid black',
+                    cursor: 'pointer', 
+                    '&:hover': { opacity: 0.8, border: '1px solid #1976d2' },
+                    mb: 2,
+                    p: 1,
+                    borderRadius: 1
+                  }}
+                />
+                <Typography variant="caption" sx={{ display: 'block' }}>
+                  {/* Use imageName instead of name, and add a check */}
+                  {item.imageName ? item.imageName.substring(0, 10) : 'N/A'}...
+                </Typography>
+                {/* Quick Delete Button */}
+                <button 
+                  onClick={() => deleteTrainingDataEntry(uniqueId)}
+                  style={{ color: 'red', cursor: 'pointer', fontSize: '10px' }}
+                >
+                  Delete
+                </button>
+              </Box>
+            )
+          })}
+        </Box>
+      )
+    },
+    {
+      label: 'Batch Images',
+      content: (
+        <Box>
+          <PopupState variant='popover' popupId='batch-model-popup-menu'>
+            {(popupState) => (
+              <Fragment>
+                <Button variant='contained' {...bindTrigger(popupState)} endIcon={<KeyboardArrowDownIcon />} sx={{ ...button_style_span, mt: 1 }}>
+                  {models[currentModel]}
+                </Button>
+                <Menu {...bindMenu(popupState)}>
+                  {models.map((item, index) => (
+                    <MenuItem key={index} onClick={() => setCurrentModel(index)}>
+                      <Typography variant='body1'>{item}</Typography>
+                    </MenuItem>
+                  ))}
+                </Menu>
+              </Fragment>
+            )}
+          </PopupState>
+          <Button variant='contained' component='label' sx={{ ...button_style_span, mt: 1 }}>
+            Add Images
+            <input hidden type='file' multiple accept='image/tiff' onChange={addToBatch} />
+          </Button>
+          <Button
+            variant='contained'
+            onClick={handleBatchDetect}
+            disabled={selectedFiles.length === 0}
+            sx={{ ...button_style_span }}
+          >
+            Process Batch ({selectedFiles.length})
+          </Button>
+          {selectedFiles.map((file, index) => (
+            <Box key={index} sx={{ textAlign: 'center' }}>
+              {batchThumbnails[fileKey(file)] ? (
+                <Box
+                  component="img"
+                  src={batchThumbnails[fileKey(file)]}
+                  alt="preview"
+                  sx={{
+                    width: 150,
+                    height: 150,
+                    border: '1px solid black',
+                    mb: 2,
+                    p: 1,
+                    borderRadius: 1,
+                    objectFit: 'contain',
+                  }}
+                />
+              ) : (
+                <Box sx={{
+                  width: 150,
+                  height: 150,
+                  border: '1px solid black',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  mb: 2,
+                  borderRadius: 1,
+                }}>
+                  <Typography variant="caption">Loading...</Typography>
+                </Box>
+              )}
+              <Typography variant="caption" sx={{ display: 'block' }}>
+                {file.name.length > 20 ? `${file.name.substring(0, 20)}...` : file.name}
+              </Typography>
+              <button
+                onClick={() => removeFromBatch(index)}
+                style={{ color: 'red', cursor: 'pointer', fontSize: '10px' }}
+              >
+                Remove
+              </button>
+            </Box>
+          ))}
+        </Box>
+      )
+    }
+  ]
 
   return (
     <Box sx={{ display: 'flex', height: '100vh', width: '100vw' }}>
@@ -1413,51 +1529,7 @@ export default function CellAnnotationTool() {
         <CellCalibrator scale={scale} onClose={() => setCalibratorOpen(false)} />
       )}
       <SideMenu anchorSide={'right'}>
-        <Typography>Training Data</Typography>
-        <Button 
-          variant="contained" 
-          color="primary"
-          onClick={handleTrainingDataDownload}
-          sx={{ mt: 2 }} // 'mt: 2' is MUI shorthand for marginTop: 16px
-          startIcon={<DownloadIcon />} // Optional: adds a nice download icon
-        >
-          Download Training Data (.zip)
-        </Button>
-        {trainingData.map((item, index) => {
-          const uniqueId = item.annotationName.replace('.txt', '')
-
-          return (
-            <Box key={index} sx={{ textAlign: 'center' }}>
-              <Box
-                component="img"
-                src={item.thumbnailUrl} // Matches your newEntry key
-                alt="preview"
-                onClick={() => loadSavedEntry(item)}
-                sx={{
-                  width: 150,
-                  height: 150,
-                  border: '1px solid black',
-                  cursor: 'pointer', 
-                  '&:hover': { opacity: 0.8, border: '1px solid #1976d2' },
-                  mb: 2,
-                  p: 1,
-                  borderRadius: 1
-                }}
-              />
-              <Typography variant="caption" sx={{ display: 'block' }}>
-                {/* Use imageName instead of name, and add a check */}
-                {item.imageName ? item.imageName.substring(0, 10) : 'N/A'}...
-              </Typography>
-              {/* Quick Delete Button */}
-              <button 
-                onClick={() => deleteTrainingDataEntry(uniqueId)}
-                style={{ color: 'red', cursor: 'pointer', fontSize: '10px' }}
-              >
-                Delete
-              </button>
-            </Box>
-          )
-        })}
+        <TabMenu items={dataTabs}></TabMenu>
       </SideMenu>
     </Box>
   )
