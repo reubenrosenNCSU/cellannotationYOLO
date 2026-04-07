@@ -94,6 +94,14 @@ export default function ImageCanvas({ src, boxes, onAddBox, onRemoveBox, isCropp
     draw()
   }, [scale, offset, boxes, currentBox, classes, brightness, contrast, windowSize, imageLoaded, tileVersion])
 
+  const getLabelTextColor = (hex) => {
+    const r = parseInt(hex.slice(1, 3), 16)
+    const g = parseInt(hex.slice(3, 5), 16)
+    const b = parseInt(hex.slice(5, 7), 16)
+    const luminance = 0.299 * r + 0.587 * g + 0.114 * b
+    return luminance > 160 ? 'black' : 'white'
+  }
+
   const draw = () => {
     const canvas = canvasRef.current
     if (!canvas) return
@@ -162,9 +170,26 @@ export default function ImageCanvas({ src, boxes, onAddBox, onRemoveBox, isCropp
     // draw existing boxes
     ctx.lineWidth = 2 / scale // scale-independent line width
 
+    const fontSize = 11 / scale
+    ctx.font = `${fontSize}px sans-serif`
+
     boxes.forEach((b) => {
-      ctx.strokeStyle = classes[b.class].color
+      const color = classes[b.class].color
+      ctx.strokeStyle = color
       ctx.strokeRect(b.x, b.y, b.w, b.h)
+
+      const label = b.confidence != null
+        ? `${classes[b.class].name} ${(b.confidence * 100).toFixed(0)}%`
+        : classes[b.class].name
+      const padding = 2 / scale
+      const textWidth = ctx.measureText(label).width
+      const labelH = fontSize + padding * 2
+      const labelY = b.y - labelH > 0 ? b.y - labelH : b.y
+
+      ctx.fillStyle = color
+      ctx.fillRect(b.x, labelY, textWidth + padding * 2, labelH)
+      ctx.fillStyle = getLabelTextColor(color)
+      ctx.fillText(label, b.x + padding, labelY + fontSize)
     })
 
     // draw box while dragging

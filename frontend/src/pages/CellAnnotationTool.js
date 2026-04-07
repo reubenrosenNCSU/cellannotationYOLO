@@ -457,16 +457,17 @@ export default function CellAnnotationTool() {
 
       yoloTxt.split('\n').forEach(line => {
         if (!line.trim()) return
-        const [clsStr, cxStr, cyStr, wStr, hStr] = line.trim().split(' ')
-        const cls = parseInt(clsStr)
-        const cx = parseFloat(cxStr) * imgWidth
-        const cy = parseFloat(cyStr) * imgHeight
-        const w = parseFloat(wStr) * imgWidth
-        const h = parseFloat(hStr) * imgHeight
+        const parts = line.trim().split(' ')
+        const cls = parseInt(parts[0])
+        const cx = parseFloat(parts[1]) * imgWidth
+        const cy = parseFloat(parts[2]) * imgHeight
+        const w = parseFloat(parts[3]) * imgWidth
+        const h = parseFloat(parts[4]) * imgHeight
         const x1 = cx - w / 2
         const y1 = cy - h / 2
+        const confidence = parts[5] ? parseFloat(parts[5]) : null
 
-        handleAddBox({x: x1, y: y1, w: w, h: h, class: cls}) //TODO add isDetected
+        handleAddBox({x: x1, y: y1, w: w, h: h, class: cls, confidence})
 
         importedCount++
       })
@@ -606,16 +607,17 @@ export default function CellAnnotationTool() {
 
       yoloTxt.split('\n').forEach(line => {
         if (!line.trim()) return
-        const [clsStr, cxStr, cyStr, wStr, hStr] = line.trim().split(' ')
-        const cls = parseInt(clsStr)
-        const cx = parseFloat(cxStr) * imgWidth
-        const cy = parseFloat(cyStr) * imgHeight
-        const w = parseFloat(wStr) * imgWidth
-        const h = parseFloat(hStr) * imgHeight
+        const parts = line.trim().split(' ')
+        const cls = parseInt(parts[0])
+        const cx = parseFloat(parts[1]) * imgWidth
+        const cy = parseFloat(parts[2]) * imgHeight
+        const w = parseFloat(parts[3]) * imgWidth
+        const h = parseFloat(parts[4]) * imgHeight
         const x1 = cx - w / 2
         const y1 = cy - h / 2
+        const confidence = parts[5] ? parseFloat(parts[5]) : null
 
-        handleAddBox({x: x1, y: y1, w: w, h: h, class: cls}) //TODO add isDetected
+        handleAddBox({x: x1, y: y1, w: w, h: h, class: cls, confidence})
 
         importedCount++
       })
