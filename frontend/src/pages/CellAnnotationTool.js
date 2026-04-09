@@ -1,5 +1,5 @@
 import { useState, useEffect, Fragment } from 'react'
-import { Box, Button, Typography, Modal } from '@mui/material'
+import { Box, Button, Typography, Modal, Checkbox } from '@mui/material'
 import PopupState, { bindTrigger, bindMenu } from 'material-ui-popup-state'
 import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown'
 import Menu from '@mui/material/Menu'
@@ -68,6 +68,8 @@ export default function CellAnnotationTool() {
   // State for batch detection
   const [selectedFiles, setSelectedFiles] = useState([])
   const [batchThumbnails, setBatchThumbnails] = useState({})
+  const [annotationsOnly, setAnnotationsOnly] = useState(false)
+  const [showLabels, setShowLabels] = useState(true)
 
   const fileKey = (file) => `${file.name}-${file.size}-${file.lastModified}`
   // State for fine tuning
@@ -88,7 +90,7 @@ export default function CellAnnotationTool() {
   }, [annotations])
 
   useEffect(() => {
-    fetch('/get-all-training-data')
+    fetch(`${API_BASE_URL}/get-all-training-data`, { credentials: 'include' })
       .then(res => res.json())
       .then(data => {
         // data is the array of objects from Python
@@ -118,14 +120,15 @@ export default function CellAnnotationTool() {
 
     setIsLoading(true)
     try {
-        const res = await fetch('/upload', {
+        const res = await fetch(`${API_BASE_URL}/upload`, {
           method: 'POST',
           body: formData,
+          credentials: 'include',
         })
 
         if (!res.ok) throw new Error('Upload failed')
         const data = await res.json()
-        setImageURL(data.converted_url)
+        setImageURL(`${API_BASE_URL}${data.converted_url}`)
         setImageSize({width: data.dimensions[0], height: data.dimensions[1]})
         setAnnotations([])
     } catch(e) {
@@ -147,7 +150,7 @@ export default function CellAnnotationTool() {
       const formData = new FormData()
       formData.append('file', file)
       try {
-        const res = await fetch('/preview-tiff', {
+        const res = await fetch(`${API_BASE_URL}/preview-tiff`, {
           method: 'POST',
           body: formData,
           credentials: 'include',
@@ -208,7 +211,7 @@ export default function CellAnnotationTool() {
     formData.append('height', Math.round(box.h))
 
     try {
-        const res = await fetch('/upload-cropped', {
+        const res = await fetch(`${API_BASE_URL}/upload-cropped`, {
           method: 'POST',
           body: formData,
           credentials: 'include',
@@ -230,7 +233,7 @@ export default function CellAnnotationTool() {
           })
         })
 
-        setImageURL(data.converted_url)
+        setImageURL(`${API_BASE_URL}${data.converted_url}`)
         setImageSize({width: box.width, height: box.height})
         
     } catch(e) {
@@ -296,7 +299,7 @@ export default function CellAnnotationTool() {
     }).join('\n')
 
     try {
-      const res = await fetch('/export-annotations', {
+      const res = await fetch(`${API_BASE_URL}/export-annotations`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -305,6 +308,7 @@ export default function CellAnnotationTool() {
         body: JSON.stringify({
           yolo_data: yoloData,
           original_filename: filename,
+          annotations_only: annotationsOnly,
         }),
       })
       if (!res.ok) {
@@ -312,11 +316,11 @@ export default function CellAnnotationTool() {
         throw new Error(errorData.error || `HTTP error! status: ${res.status}`)
       }
       const blob = await res.blob()
-      const zipBlob = new Blob([blob], { type: 'application/zip' })
-      const downloadUrl = window.URL.createObjectURL(zipBlob)
+      const downloadUrl = window.URL.createObjectURL(blob)
       const link = document.createElement('a')
       link.href = downloadUrl
-      link.setAttribute('download', `${imageName}_export.zip`)
+      const baseName = imageName.substring(0, imageName.lastIndexOf('.')) || imageName
+      link.setAttribute('download', annotationsOnly ? `${baseName}.txt` : `${imageName}_export.zip`)
       document.body.appendChild(link)
       link.click()
       window.URL.revokeObjectURL(downloadUrl)
@@ -405,17 +409,17 @@ export default function CellAnnotationTool() {
     let headers = {}
 
     if (currentModel === 0) {
-      endpoint = '/detect-sgn'
+      endpoint = `${API_BASE_URL}/detect-sgn`
     } else if (currentModel === 1) {
-      endpoint = '/detect-cd3'
+      endpoint = `${API_BASE_URL}/detect-cd3`
     } else if (currentModel === 2) {
-      endpoint = '/detect-madm'
+      endpoint = `${API_BASE_URL}/detect-madm`
     } else if (currentModel === 3) {
       if (!customModel) {
         alert('Please upload a custom model (.pt)')
         return
       }
-      endpoint = '/detect-custom'
+      endpoint = `${API_BASE_URL}/detect-custom`
       formData.append('pt_file', customModel)
       formData.append('model_type', customModelType)
       formData.append('threshold', threshold)
@@ -509,9 +513,10 @@ export default function CellAnnotationTool() {
     selectedFiles.forEach(file => formData.append('images', file));
     setIsLoading(true)
     try {
-      const res = await fetch('/batch-detect', {
+      const res = await fetch(`${API_BASE_URL}/batch-detect`, {
         method: 'POST',
         body: formData,
+        credentials: 'include',
       });
 
       if (!res.ok) throw new Error(`${models[currentModel]} batch detection failed`)
@@ -582,7 +587,7 @@ export default function CellAnnotationTool() {
   async function handleFineTuneDetect() {
     setIsLoading(true)
     try {
-      const res = await fetch('/detect-finetuned', {
+      const res = await fetch(`${API_BASE_URL}/detect-finetuned`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -654,7 +659,7 @@ export default function CellAnnotationTool() {
     })
 
     try {
-      const res = await fetch('/save-training-data', {
+      const res = await fetch(`${API_BASE_URL}/save-training-data`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -710,7 +715,7 @@ export default function CellAnnotationTool() {
 
     setIsLoading(true)
     try {
-      const res = await fetch('/train-saved', {
+      const res = await fetch(`${API_BASE_URL}/train-saved`, {
         method: 'POST',
         credentials: 'include',
         body: formData
@@ -740,7 +745,7 @@ export default function CellAnnotationTool() {
     if (!confirm) return
 
     try {
-      const res = await fetch('/clear-training-data', {
+      const res = await fetch(`${API_BASE_URL}/clear-training-data`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -777,8 +782,9 @@ export default function CellAnnotationTool() {
     if (!window.confirm("Are you sure you want to delete this training sample?")) return
 
     try {
-      const res = await fetch(`/delete-training-data/${uniqueId}`, {
+      const res = await fetch(`${API_BASE_URL}/delete-training-data/${uniqueId}`, {
         method: 'DELETE',
+        credentials: 'include',
       })
       if (res.ok) {
         setTrainingData(prev => prev.filter(item => !item.annotationName.includes(uniqueId)))
@@ -799,7 +805,7 @@ export default function CellAnnotationTool() {
           const imageLink = `${item.thumbnailUrl}`
           
           // 2. Fetch annotations
-          const response = await fetch(`/api/annotations/${item.annotationName}`)
+          const response = await fetch(`${API_BASE_URL}/api/annotations/${item.annotationName}`, { credentials: 'include' })
           if (!response.ok) throw new Error('Failed to fetch annotations')
           const yoloText = await response.text()
 
@@ -830,7 +836,7 @@ export default function CellAnnotationTool() {
 
           // 4. Update states
           setImageName(item.imageName)
-          setImageURL(imageLink)
+          setImageURL(`${API_BASE_URL}${imageLink}`)
           setAnnotations(parsedAnnotations)
           
       } catch (error) {
@@ -843,7 +849,7 @@ export default function CellAnnotationTool() {
     try {
       // 1. Prepare the URL
       // If fineTuneModelURL is "/snapshots/my_model.pt", this prepends the backend host
-      const downloadUrl = fineTuneModelURL
+      const downloadUrl = `${API_BASE_URL}${fineTuneModelURL}`
       console.log(downloadUrl)
       const res = await fetch(downloadUrl, {
         method: 'GET',
@@ -881,7 +887,7 @@ export default function CellAnnotationTool() {
 
   const handleTrainingDataDownload = async () => {
     try {
-      const res = await fetch('/download-training-data', {
+      const res = await fetch(`${API_BASE_URL}/download-training-data`, {
         method: 'GET',
         credentials: 'include', 
       })
@@ -916,8 +922,9 @@ export default function CellAnnotationTool() {
 
   async function getMetrics() {
     try {
-      const res = await fetch('/events-data', {
-        method: 'GET'
+      const res = await fetch(`${API_BASE_URL}/events-data`, {
+        method: 'GET',
+        credentials: 'include',
       })
       if (!res.ok) {
         const errorData = await res.json().catch(() => ({}))
@@ -1031,6 +1038,17 @@ export default function CellAnnotationTool() {
             <Button variant='contained' component='label' onClick={exportAnnotations} sx={{...button_style_span}}>
               Export Annotations
             </Button>
+            <Tooltip title="Check to export only the annotation .txt file. Leave unchecked to export the image as well." arrow placement="top">
+              <Box sx={{ display: 'flex', alignItems: 'center', mb: 0.5 }}>
+                <Checkbox
+                  checked={annotationsOnly}
+                  onChange={(e) => setAnnotationsOnly(e.target.checked)}
+                  size='small'
+                  sx={{ p: 0, mr: 0.5 }}
+                />
+                <Typography variant='body2'>Annotations only</Typography>
+              </Box>
+            </Tooltip>
             <Button variant='contained' component='label' sx={{...button_style_span}}>
               Import Annotations
               <input hidden type='file' accept='txt' onChange={importAnnotations}/>
@@ -1038,6 +1056,15 @@ export default function CellAnnotationTool() {
             <Button variant='contained' component='label' onClick={clearAnnotations} sx={{...button_style_span, bgcolor: 'error.dark', '&:hover': { bgcolor: 'error.light' }}}>
               Clear Annotations
             </Button>
+            <Box sx={{ display: 'flex', alignItems: 'center', mb: 0.5 }}>
+              <Checkbox
+                checked={showLabels}
+                onChange={(e) => setShowLabels(e.target.checked)}
+                size='small'
+                sx={{ p: 0, mr: 0.5 }}
+              />
+              <Typography variant='body2'>Show labels</Typography>
+            </Box>
             <Typography gutterBottom variant='body2' sx={{ fontWeight: 'bold' }}>
               Current Cells: {annotations.length}
             </Typography>
@@ -1513,19 +1540,28 @@ export default function CellAnnotationTool() {
         <TabMenu items={tabs}></TabMenu>
       </SideMenu>
 
-      <Box
-				sx={{
-					flexGrow: 1,
-					display: 'flex',
-					justifyContent: 'center',
-					bgcolor: '#111',
-				}}
-			>
-        <ImageCanvas src={imageURL} boxes={annotations} onAddBox={handleAddBox} 
-          onRemoveBox={handleRemoveBox} isCropping={isCropping} onCrop={handleCrop}
-          currentClass={currentClass} classes={classes} imageSize={imageSize}
-          brightness={brightness} contrast={contrast}
-          scale={scale} onScaleChange={setScale}/>
+      <Box sx={{ flexGrow: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+        <Box sx={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          bgcolor: '#1e1e1e',
+          borderBottom: '1px solid #333',
+          px: 2,
+          py: 0.75,
+          minHeight: 36,
+        }}>
+          <Typography variant='body2' sx={{ color: '#ccc', fontFamily: 'monospace' }}>
+            {imageName || 'No image loaded'}
+          </Typography>
+        </Box>
+        <Box sx={{ flexGrow: 1, display: 'flex', justifyContent: 'center', bgcolor: '#111' }}>
+          <ImageCanvas src={imageURL} boxes={annotations} onAddBox={handleAddBox}
+            onRemoveBox={handleRemoveBox} isCropping={isCropping} onCrop={handleCrop}
+            currentClass={currentClass} classes={classes} imageSize={imageSize}
+            brightness={brightness} contrast={contrast}
+            scale={scale} onScaleChange={setScale} showLabels={showLabels}/>
+        </Box>
       </Box>
       {calibratorOpen && (
         <CellCalibrator scale={scale} onClose={() => setCalibratorOpen(false)} />

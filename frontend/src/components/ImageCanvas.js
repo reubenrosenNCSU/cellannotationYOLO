@@ -6,7 +6,7 @@ const LARGE_IMAGE_THRESHOLD = 16000
 const MAX_VISIBLE_TILES = 36
 
 export default function ImageCanvas({ src, boxes, onAddBox, onRemoveBox, isCropping,
-    onCrop, currentClass, classes, imageSize, brightness, contrast, scale, onScaleChange }) {
+    onCrop, currentClass, classes, imageSize, brightness, contrast, scale, onScaleChange, showLabels = true }) {
   const canvasRef = useRef(null)
   const imgRef = useRef(null)
   const tilesRef = useRef({})
@@ -92,7 +92,7 @@ export default function ImageCanvas({ src, boxes, onAddBox, onRemoveBox, isCropp
   // draw loop
   useEffect(() => {
     draw()
-  }, [scale, offset, boxes, currentBox, classes, brightness, contrast, windowSize, imageLoaded, tileVersion])
+  }, [scale, offset, boxes, currentBox, classes, brightness, contrast, windowSize, imageLoaded, tileVersion, showLabels])
 
   const getLabelTextColor = (hex) => {
     const r = parseInt(hex.slice(1, 3), 16)
@@ -152,7 +152,8 @@ export default function ImageCanvas({ src, boxes, onAddBox, onRemoveBox, isCropp
               setTileVersion(v => v + 1)
             }
             img.onerror = () => { tilesRef.current[key] = 'error' }
-            img.src = `/tile/${filename}/${tx}/${ty}/${TILE_SIZE}`
+            const baseURL = src ? new URL(src).origin : ''
+            img.src = `${baseURL}/tile/${filename}/${tx}/${ty}/${TILE_SIZE}`
           } else if (cached !== 'loading' && cached !== 'error') {
             ctx.drawImage(cached, tx * TILE_SIZE, ty * TILE_SIZE)
           }
@@ -178,18 +179,20 @@ export default function ImageCanvas({ src, boxes, onAddBox, onRemoveBox, isCropp
       ctx.strokeStyle = color
       ctx.strokeRect(b.x, b.y, b.w, b.h)
 
-      const label = b.confidence != null
-        ? `${classes[b.class].name} ${(b.confidence * 100).toFixed(0)}%`
-        : classes[b.class].name
-      const padding = 2 / scale
-      const textWidth = ctx.measureText(label).width
-      const labelH = fontSize + padding * 2
-      const labelY = b.y - labelH > 0 ? b.y - labelH : b.y
+      if (showLabels) {
+        const label = b.confidence != null
+          ? `${classes[b.class].name} ${(b.confidence * 100).toFixed(0)}%`
+          : classes[b.class].name
+        const padding = 2 / scale
+        const textWidth = ctx.measureText(label).width
+        const labelH = fontSize + padding * 2
+        const labelY = b.y - labelH > 0 ? b.y - labelH : b.y
 
-      ctx.fillStyle = color
-      ctx.fillRect(b.x, labelY, textWidth + padding * 2, labelH)
-      ctx.fillStyle = getLabelTextColor(color)
-      ctx.fillText(label, b.x + padding, labelY + fontSize)
+        ctx.fillStyle = color
+        ctx.fillRect(b.x, labelY, textWidth + padding * 2, labelH)
+        ctx.fillStyle = getLabelTextColor(color)
+        ctx.fillText(label, b.x + padding, labelY + fontSize)
+      }
     })
 
     // draw box while dragging

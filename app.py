@@ -346,8 +346,21 @@ def export_annotations():
     try:
         # Get both CSV data and current image name from request
         data = request.json
-        yolo_data = data['yolo_data']  # Changed from csv_data
+        yolo_data = data['yolo_data']
         original_filename = data['original_filename']
+        annotations_only = data.get('annotations_only', False)
+        base_name = os.path.splitext(original_filename)[0]
+
+        if annotations_only:
+            txt_buffer = io.BytesIO(yolo_data.encode('utf-8'))
+            txt_buffer.seek(0)
+            return send_file(
+                txt_buffer,
+                mimetype='text/plain',
+                as_attachment=True,
+                download_name=f'{base_name}.txt'
+            )
+
         user_upload_dir = os.path.join('users', user_id, 'uploads')
 
         # Get current TIFF path
@@ -358,10 +371,8 @@ def export_annotations():
         # Create in-memory ZIP file
         zip_buffer = io.BytesIO()
         with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zipf:
-            # Add YOLO txt file instead of CSV
-            txt_filename = f"{os.path.splitext(original_filename)[0]}.txt"
+            txt_filename = f"{base_name}.txt"
             zipf.writestr(txt_filename, yolo_data)
-            # Add TIFF
             zipf.write(tiff_path, os.path.basename(tiff_path))
 
         zip_buffer.seek(0)
@@ -370,7 +381,7 @@ def export_annotations():
             zip_buffer,
             mimetype='application/zip',
             as_attachment=True,
-            download_name=f'{os.path.splitext(original_filename)[0]}_export.zip'
+            download_name=f'{base_name}_export.zip'
         )
 
     except Exception as e:
