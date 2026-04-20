@@ -26,6 +26,7 @@ from ultralytics import YOLO
 from scripts.normalization import normalize_image
 from scripts.sahi_detect import detect_to_yolo
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))  # Gets directory where app.py is
+os.chdir(BASE_DIR)
 from PIL import Image
 import tifffile
 from flask_sqlalchemy import SQLAlchemy
@@ -533,16 +534,16 @@ def save_training_data():
         
         # Class mapping
         CLASS_MAP = {
-            "SGN": 0,
-            "yellow neuron": 1,
-            "yellow astrocyte": 2,
-            "green neuron": 3,
-            "green astrocyte": 4,
-            "red neuron": 5,
-            "red astrocyte": 6,
-            "CD3": 7
+            'red astrocyte':    0,
+            'green astrocyte':  1,
+            'yellow astrocyte': 2,
+            'red neuron':       3,
+            'green neuron':     4,
+            'yellow neuron':    5,
+            'SGN':              0,  # only used when training SGN model separately
+            'CD3':              0,  # only used when training CD3 model separately
         }
-        
+                
         # Create YOLO annotations with consistent formatting (already in original coordinates)
         yolo_lines = []
         for ann in annotations:
@@ -1016,14 +1017,12 @@ def train_saved_data():
             # These should match the classes your MADM model is designed to detect.
             # This list is derived from your CLASS_MAP in the /save-training-data route.
             class_names = [
-                "SGN", 
-                "yellow neuron", 
-                "yellow astrocyte", 
-                "green neuron", 
-                "green astrocyte", 
-                "red neuron", 
                 "red astrocyte",
-                "CD3"
+                "green astrocyte",
+                "yellow astrocyte",
+                "red neuron",
+                "green neuron",
+                "yellow neuron",
             ]
         else:
             # Fallback for any unexpected model type
@@ -1045,37 +1044,19 @@ def train_saved_data():
         weights = 'snapshots/SGN_best.pt' if model_type == 'SGN' else 'snapshots/cd3_v3.pt' if model_type == 'CD3' else 'snapshots/MADM_v3.pt'
         run_name = f"run_{int(time.time())}"
         print(f"[DEBUG] Starting YOLO train, weights={weights}, run name={run_name}")
+        import subprocess, sys
 
-        if model_type == 'SGN':
-            print("[DEBUG] Using SGN-specific loading (SPPF fix)...")
-            try:
-                # Attempt to load by explicitly defining the task to bypass some init checks
-                model = YOLO(weights, task='detect')
-            except TypeError as e:
-                if "SPPF" in str(e) or "C3k2" in str(e):
-                    print("[DEBUG] SGN architecture mismatch. Forcing fresh architecture load...")
-                    # This loads the default YOLOv8/11 yaml and then maps your weights onto it
-                    # Use 'yolo11n.yaml' if it's a v11 model, or 'yolov8n.yaml' otherwise
-                    model = YOLO('yolov8n.yaml').load(weights)
-                else:
-                    raise e
-        else:
-            # Original MADM / CD3 logic
-            print(f"[DEBUG] Using standard loading for {model_type}")
-            model = YOLO(weights)
+        train_cmd = [
+            sys.executable, 'scripts/run_train.py',
+            '--data',    yaml_path,
+            '--weights', weights,
+            '--epochs',  str(epochs),
+            '--project', snapshot_dir,
+            '--name',    run_name,
+        ]
 
-        # Proceed with training
-        model.train(
-            data=yaml_path,
-            epochs=epochs,
-            imgsz=640,
-            batch=4,
-            project=snapshot_dir,
-            name=run_name,
-            save=True,
-            workers=0,
-            plots=False
-        )
+        print(f"[DEBUG] Launching training subprocess: {' '.join(train_cmd)}")
+        result = subprocess.run(train_cmd, check=True, capture_output=False)
 
         best = os.path.join(snapshot_dir, run_name, 'weights', 'best.pt')
         time.sleep(3)
@@ -1105,7 +1086,7 @@ def train_saved_data():
         os.makedirs(kfold_dir, exist_ok=True)
 
         cmd = [
-            'python3', 'scripts/kfold_train.py',
+            sys.executable, 'scripts/kfold_train.py',  # ← inherits the correct env
             '--image_dir', img_dir,
             '--label_dir', lbl_dir,
             '--weights', best,
@@ -1245,22 +1226,48 @@ def detect_finetuned():
     user_id = session['user_id']
     try:
         model_type = request.json.get('model_type', 'SGN')
+        threshold = float(request.json.get('threshold', 0.5))
+        cell_diameter = float(request.json.get('cell_diameter', 34))
+
         model_path = os.path.join('users', user_id, 'snapshots', f'{model_type}_finetuned.pt')
         if not os.path.exists(model_path):
-            return jsonify({'error': 'No trained model found'}), 400
-        
-        annotations, img_width, img_height, error = detect_with_tiling(user_id, model_path)
-        if error:
-            return jsonify({'error': error}), 500
+            return jsonify({'error': f'No fine-tuned {model_type} model found. Train one first.'}), 400
+
+        upload_dir = os.path.join('users', user_id, 'uploads')
+        files = [f for f in os.listdir(upload_dir) if f.lower().endswith(('.tif', '.tiff', '.png', '.jpg', '.jpeg'))]
+        if not files:
+            return jsonify({'error': 'No image found. Upload an image first.'}), 400
+
+        image_path = os.path.join(upload_dir, files[0])
+
+        prep_data = preprocess_image(image_path, upload_dir, model_type, cell_diameter,
+                                     p_low=session.get('norm_p_low'), p_high=session.get('norm_p_high'))
+
+        with Image.open(image_path) as img:
+            image_width, image_height = img.size
+
+        final_annotation = detect_to_yolo(
+            image_path=prep_data['path'],
+            model_path=model_path,
+            image_width=prep_data['det_w'],
+            image_height=prep_data['det_h'],
+            threshold=threshold,
+        )
+
+        if os.path.exists(prep_data['path']):
+            os.remove(prep_data['path'])
 
         return jsonify({
-            "annotations": annotations,
-            "image_width": img_width,
-            "image_height": img_height
+            "annotations": final_annotation,
+            "image_width": image_width,
+            "image_height": image_height
         })
 
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        import traceback
+        error_details = traceback.format_exc()
+        print(error_details)
+        return jsonify({'error': str(e), 'traceback': error_details}), 500
 
 
 @app.route('/batch-detect', methods=['POST'])

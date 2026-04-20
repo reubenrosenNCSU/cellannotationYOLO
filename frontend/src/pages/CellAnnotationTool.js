@@ -20,7 +20,7 @@ import CellCalibrator from '../components/CellCalibrator'
 
 export default function CellAnnotationTool() {
   // Base URL for the backend API
-  const API_BASE_URL = 'http://10.80.24.12:5002'
+  const API_BASE_URL = 'http://10.80.24.12:5001'
 
   const [isLoading, setIsLoading] = useState(false)
 
@@ -40,14 +40,14 @@ export default function CellAnnotationTool() {
   // Steate for annotations
   const [annotations, setAnnotations] = useState([])
   const [classes, setClasses] = useState([
-    { name: 'SGN', color: '#CA00BC' },
-    { name: 'Yellow Neuron', color: '#FAF38F' },
-    { name: 'Yellow Astrocyte', color: '#FFBB00' },
-    { name: 'Green Neuron', color: '#B3FFD2' },
-    { name: 'Green Astrocyte', color: '#066A30' },
-    { name: 'Red Neuron', color: '#FAABA2' },
-    { name: 'Red Astrocyte', color: '#B03022' },
-    { name: 'CD3', color: '#600089' },
+    { name: 'Red Astrocyte',    color: '#B03022' },  // index 0 = MADM class 0 (RG)
+    { name: 'Green Astrocyte',  color: '#066A30' },  // index 1 = MADM class 1 (GG)
+    { name: 'Yellow Astrocyte', color: '#FFBB00' },  // index 2 = MADM class 2 (YG)
+    { name: 'Red Neuron',       color: '#FAABA2' },  // index 3 = MADM class 3 (RN)
+    { name: 'Green Neuron',     color: '#B3FFD2' },  // index 4 = MADM class 4 (GN)
+    { name: 'Yellow Neuron',    color: '#FAF38F' },  // index 5 = MADM class 5 (YN)
+    { name: 'SGN',              color: '#CA00BC' },  // index 6 = SGN model
+    { name: 'CD3',              color: '#600089' },  // index 7 = CD3 model
   ])
   const [currentClass, setCurrentClass] = useState(0)
 
@@ -645,7 +645,7 @@ export default function CellAnnotationTool() {
       const width_norm = parseFloat((ann.w / imageSize.width).toFixed(6));
       const height_norm = parseFloat((ann.h / imageSize.height).toFixed(6));
       let class_name = classes[ann.class].name
-      if (ann.class !== 0 && ann.class !== 7) {
+      if (ann.class !== 6 && ann.class !== 7) {
         class_name = class_name.toLowerCase()
       }
       console.log(class_name)
@@ -1374,7 +1374,7 @@ export default function CellAnnotationTool() {
               <Box key={index} sx={{ textAlign: 'center' }}>
                 <Box
                   component="img"
-                  src={item.thumbnailUrl} // Matches your newEntry key
+                  src={`${API_BASE_URL}${item.thumbnailUrl}`} // Matches your newEntry key
                   alt="preview"
                   onClick={() => loadSavedEntry(item)}
                   sx={{
