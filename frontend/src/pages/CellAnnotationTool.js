@@ -828,12 +828,18 @@ export default function CellAnnotationTool() {
           if (!response.ok) throw new Error('Failed to fetch annotations')
           const yoloText = await response.text()
 
-          // 3. We need the image dimensions to convert normalized -> pixels
-          // If they aren't in 'item', we can get them from the imageURL loading later
-          // For now, let's assume imageSize is already correct or will be updated
-          const { width, height } = imageSize; 
+          // 3. GET IMAGE DIMENSIONS (Wait for it to load)
+          const dimensions = await new Promise((resolve, reject) => {
+              const img = new Image()
+              img.onload = () => resolve({ width: img.width, height: img.height })
+              img.onerror = () => reject(new Error("Could not load image to determine size"))
+              img.src = imageLink;
+          });
+
+        const { width, height } = dimensions
 
           const lines = yoloText.trim().split('\n')
+          console.log(lines)
           const parsedAnnotations = lines.filter(line => line.trim()).map(line => {
               const [classId, x_norm, y_norm, w_norm, h_norm] = line.split(' ').map(Number)
               
@@ -842,10 +848,12 @@ export default function CellAnnotationTool() {
               const h = h_norm * height
               const x = (x_norm * width) - (w / 2)
               const y = (y_norm * height) - (h / 2)
-
+              
+              let annotationClass = classId
+              if (currentModel == 0) annotationClass = 2 //TODO: Find better way to check model of saved entry, current model may not be the same as the entry
               return {
                   id: Math.random().toString(36).substr(2, 9),
-                  class: classId,
+                  class: annotationClass,
                   x: x,
                   y: y,
                   w: w,
