@@ -534,14 +534,10 @@ def save_training_data():
         
         # Class mapping
         CLASS_MAP = {
-            'red astrocyte':    0,
-            'green astrocyte':  1,
-            'yellow astrocyte': 2,
-            'red neuron':       3,
-            'green neuron':     4,
-            'yellow neuron':    5,
-            'SGN':              0,  # only used when training SGN model separately
-            'CD3':              0,  # only used when training CD3 model separately
+            'neuron': 0,
+            'glia':   1,
+            'SGN':    0,  # only used when training SGN model separately
+            'CD3':    0,  # only used when training CD3 model separately
         }
                 
         # Create YOLO annotations with consistent formatting (already in original coordinates)
@@ -736,7 +732,7 @@ def detect_madm():
             return jsonify({'error': 'No image found. Upload an image first.'}), 400
 
         image_path = os.path.join(upload_dir, files[0])
-        model_path = 'snapshots/MADM_v3.pt'
+        model_path = 'snapshots/MADM_best_latest.pt'
 
         prep_data = preprocess_image(image_path, upload_dir, 'MADM', cell_diameter,
                                      p_low=session.get('norm_p_low'), p_high=session.get('norm_p_high'))
@@ -1013,17 +1009,7 @@ def train_saved_data():
             # Hard-code CD3 at index 7 (with dummies at 0–6)
             class_names = [f"dummy{i}" for i in range(7)] + ["CD3"]
         elif model_type == 'MADM':
-            # ❗ ADDED: Explicitly define MADM class names
-            # These should match the classes your MADM model is designed to detect.
-            # This list is derived from your CLASS_MAP in the /save-training-data route.
-            class_names = [
-                "red astrocyte",
-                "green astrocyte",
-                "yellow astrocyte",
-                "red neuron",
-                "green neuron",
-                "yellow neuron",
-            ]
+            class_names = ["neuron", "glia"]
         else:
             # Fallback for any unexpected model type
             return jsonify({'error': f'Unsupported model type for training: {model_type}'}), 400
@@ -1041,7 +1027,7 @@ def train_saved_data():
         print(f"[DEBUG] data.yaml written with nc={nc}, names={class_names}")
 
         # --- 6. Train model ---
-        weights = 'snapshots/SGN_best.pt' if model_type == 'SGN' else 'snapshots/cd3_v3.pt' if model_type == 'CD3' else 'snapshots/MADM_v3.pt'
+        weights = 'snapshots/SGN_best.pt' if model_type == 'SGN' else 'snapshots/cd3_v3.pt' if model_type == 'CD3' else 'snapshots/MADM_best_latest.pt'
         run_name = f"run_{int(time.time())}"
         print(f"[DEBUG] Starting YOLO train, weights={weights}, run name={run_name}")
         import subprocess, sys
@@ -1312,7 +1298,7 @@ def batch_detect():
         results = []
         model_map = {
             'SGN': 'snapshots/SGN_best.pt',
-            'MADM': 'snapshots/MADM_v3.pt',
+            'MADM': 'snapshots/MADM_best_latest.pt',
             'CD3': 'snapshots/cd3_v3.pt'
         }
         active_model = model_path or model_map.get(detection_type)

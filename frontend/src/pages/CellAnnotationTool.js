@@ -40,14 +40,10 @@ export default function CellAnnotationTool() {
   // Steate for annotations
   const [annotations, setAnnotations] = useState([])
   const [classes, setClasses] = useState([
-    { name: 'Red Astrocyte',    color: '#B03022' },  // index 0 = MADM class 0 (RG)
-    { name: 'Green Astrocyte',  color: '#066A30' },  // index 1 = MADM class 1 (GG)
-    { name: 'Yellow Astrocyte', color: '#FFBB00' },  // index 2 = MADM class 2 (YG)
-    { name: 'Red Neuron',       color: '#FAABA2' },  // index 3 = MADM class 3 (RN)
-    { name: 'Green Neuron',     color: '#B3FFD2' },  // index 4 = MADM class 4 (GN)
-    { name: 'Yellow Neuron',    color: '#FAF38F' },  // index 5 = MADM class 5 (YN)
-    { name: 'SGN',              color: '#CA00BC' },  // index 6 = SGN model
-    { name: 'CD3',              color: '#600089' },  // index 7 = CD3 model
+    { name: 'Neuron', color: '#60A5FA' },  // index 0 = MADM class 0
+    { name: 'Glia',   color: '#F59E0B' },  // index 1 = MADM class 1
+    { name: 'SGN',    color: '#CA00BC' },  // index 2 = SGN model
+    { name: 'CD3',    color: '#600089' },  // index 3 = CD3 model
   ])
   const [currentClass, setCurrentClass] = useState(0)
 
@@ -645,7 +641,7 @@ export default function CellAnnotationTool() {
       const width_norm = parseFloat((ann.w / imageSize.width).toFixed(6));
       const height_norm = parseFloat((ann.h / imageSize.height).toFixed(6));
       let class_name = classes[ann.class].name
-      if (ann.class !== 6 && ann.class !== 7) {
+      if (ann.class < 2) {
         class_name = class_name.toLowerCase()
       }
       console.log(class_name)
