@@ -390,7 +390,7 @@ export default function CellAnnotationTool() {
 
     let total = 0
     annotations.forEach(ann => {
-      total += Math.sqrt(ann.w ** 2 + ann.h ** 2)
+      total += (ann.w + ann.h) / 2
     })
 
     const avgDiameter = Math.round(total / annotations.length)
@@ -855,7 +855,7 @@ export default function CellAnnotationTool() {
       console.log(downloadUrl)
       const res = await fetch(downloadUrl, {
         method: 'GET',
-        credentials: 'include', // ⚠️ CRITICAL: Must be here to send cookies/session!
+        credentials: 'include',
       })
 
       if (!res.ok) {

@@ -22,7 +22,7 @@ export default function CellCalibrator({ scale = 1, onClose }) {
   // Since this is a square, w and h are both 'size'
   const imageSpaceSize = size / scale
   const diagonalDiameter = scale > 0 
-    ? Math.round(Math.sqrt(imageSpaceSize ** 2 + imageSpaceSize ** 2)) 
+    ? Math.round(imageSpaceSize)
     : 0
 
   const handleWindowMouseDown = useCallback((e) => {
@@ -80,7 +80,7 @@ export default function CellCalibrator({ scale = 1, onClose }) {
         top: position.y,
         width: windowSize,
         borderRadius: 2,
-        backdropFilter: 'blur(8px)',
+        backdropFilter: 'blur(1px)',
         zIndex: 1300,
         cursor: 'grab',
         '&:active': { cursor: 'grabbing' },
@@ -150,7 +150,7 @@ export default function CellCalibrator({ scale = 1, onClose }) {
         display: 'flex',
         alignItems: 'center',
         gap: 1,
-        bgcolor: 'rgba(0, 229, 255, 0.1)',
+        bgcolor: 'rgba(20, 20, 25, 0.95)',
         borderTop: '1px solid rgba(0, 229, 255, 0.2)'
       }}>
         <SquareFootIcon sx={{ fontSize: 16, color: '#00e5ff' }} />
