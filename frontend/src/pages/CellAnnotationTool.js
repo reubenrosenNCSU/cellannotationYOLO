@@ -37,7 +37,7 @@ export default function CellAnnotationTool() {
   const [cMin, setCMin] = useState(-100)
   const [cMax, setCMax] = useState(100)
 
-  // Steate for annotations
+  // State for annotations
   const [annotations, setAnnotations] = useState([])
   const [classes, setClasses] = useState([
     { name: 'Neuron', color: '#60A5FA' },  // index 0 = MADM class 0
@@ -46,6 +46,7 @@ export default function CellAnnotationTool() {
     { name: 'CD3',    color: '#600089' },  // index 3 = CD3 model
   ])
   const [currentClass, setCurrentClass] = useState(0)
+  const [undoStack, setUndoStack] = useState([])
 
   // State for model selection and detection settings
   const [models] = useState(['SGN', 'CD3', 'MADM', 'Custom'])
@@ -97,6 +98,20 @@ export default function CellAnnotationTool() {
       })
       .catch(err => console.error("Error loading gallery:", err));
   }, []);
+
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+    const isZ = e.key.toLowerCase() === 'z'
+    const isModifierPressed = e.ctrlKey || e.metaKey
+
+    if (isZ && isModifierPressed && undoStack.length > 0) {
+      handleRemoveBox(undoStack[undoStack.length - 1])
+    }
+  }
+
+  window.addEventListener('keydown', handleKeyDown)
+  return () => window.removeEventListener('keydown', handleKeyDown)
+  })
   
   // *----------* Image Operations *----------* \\
 
@@ -258,12 +273,14 @@ export default function CellAnnotationTool() {
     }
     if (imageURL) {
       setAnnotations(prev => [...prev, box])
+      setUndoStack(prev => [...prev, box])
       //detectCellDiameter()
     }
   }
 
   const handleRemoveBox = (box) => {
     setAnnotations(prev => prev.filter(b => b !== box))
+    setUndoStack(prev => prev.slice(0, -1))
     //detectCellDiameter()
   }
 
