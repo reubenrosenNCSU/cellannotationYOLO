@@ -83,6 +83,9 @@ export default function CellAnnotationTool() {
     if (annotations.length > 0) {
       detectCellDiameter()
     }
+
+    console.log(annotations)
+    console.log(currentModel)
   }, [annotations])
 
   useEffect(() => {
@@ -467,11 +470,14 @@ export default function CellAnnotationTool() {
         const y1 = cy - h / 2
         const confidence = parts[5] ? parseFloat(parts[5]) : null
 
-        handleAddBox({x: x1, y: y1, w: w, h: h, class: cls, confidence})
+        let annotationClass = cls
+        if (currentModel == 0) {
+          annotationClass = 2
+        }
+        handleAddBox({x: x1, y: y1, w: w, h: h, class: annotationClass, confidence})
 
         importedCount++
       })
-
       alert(`Detected ${importedCount} ${models[currentModel]} objects!`)
     } catch (e) {
       alert('Detection failed: ' + (e.response?.data?.error || e.message))
