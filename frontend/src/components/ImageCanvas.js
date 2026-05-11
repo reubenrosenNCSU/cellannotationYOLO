@@ -326,7 +326,7 @@ export default function ImageCanvas({ src, boxes, onAddBox, onRemoveBox, isCropp
   }
 
   const handleWheel = (e) => {
-    e.preventDefault()
+    //e.preventDefault()
     
     const delta = e.deltaY < 0 ? 1.1 : 0.9
 
