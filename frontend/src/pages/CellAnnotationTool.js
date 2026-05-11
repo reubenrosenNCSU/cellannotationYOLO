@@ -79,6 +79,7 @@ export default function CellAnnotationTool() {
   const [fineTuneModelURL, setFineTuneModelURL] = useState()
   const [metricsData, setMetricsData] = useState()
   const [trainingData, setTrainingData] = useState([])
+  const [savedAnnotationCount, setSavedAnnotationCount] = useState(0)
 
   useEffect(() => {
     if (annotations.length > 0) {
@@ -268,9 +269,11 @@ export default function CellAnnotationTool() {
   // *----------* Annotation Operations *----------* \\
 
   const handleAddBox = (box) => {
-    if (!box.class) {
-      box.class = currentClass
-    }
+    //console.log(box)
+    // if (!box.class) {
+    //   console.log("Assigning default class")
+    //   box.class = currentClass
+    // }
     if (imageURL) {
       setAnnotations(prev => [...prev, box])
       setUndoStack(prev => [...prev, box])
@@ -488,7 +491,7 @@ export default function CellAnnotationTool() {
         const confidence = parts[5] ? parseFloat(parts[5]) : null
 
         let annotationClass = cls
-        if (currentModel == 0) {
+        if (currentModel === 0) {
           annotationClass = 2
         }
         handleAddBox({x: x1, y: y1, w: w, h: h, class: annotationClass, confidence})
@@ -697,6 +700,7 @@ export default function CellAnnotationTool() {
       }
       const data = await res.json()
       console.log('Success from Server:', data)
+      setSavedAnnotationCount(savedAnnotationCount + annotations.length)
       const newEntry = {
         imageName: data.image_file,
         annotationName: data.annotation_file,
@@ -776,6 +780,7 @@ export default function CellAnnotationTool() {
         throw new Error(errorData.error || `HTTP error! status: ${res.status}`)
       }
       alert('All training data has been cleared!')
+      setSavedAnnotationCount(0)
       setTrainingData([])
     } catch (error) {
       console.error(error)
@@ -806,6 +811,8 @@ export default function CellAnnotationTool() {
         credentials: 'include',
       })
       if (res.ok) {
+        const data = await res.json()
+        setSavedAnnotationCount(savedAnnotationCount - data.deleted_annotations)
         setTrainingData(prev => prev.filter(item => !item.annotationName.includes(uniqueId)))
       } else {
         alert("Failed to delete from server.")
@@ -850,7 +857,7 @@ export default function CellAnnotationTool() {
               const y = (y_norm * height) - (h / 2)
               
               let annotationClass = classId
-              if (currentModel == 0) annotationClass = 2 //TODO: Find better way to check model of saved entry, current model may not be the same as the entry
+              if (currentModel === 0) annotationClass = 2 //TODO: Find better way to check model of saved entry, current model may not be the same as the entry
               return {
                   id: Math.random().toString(36).substr(2, 9),
                   class: annotationClass,
@@ -1385,6 +1392,9 @@ export default function CellAnnotationTool() {
       content: (
         <Box>
           <Typography>Saved Training Data</Typography>
+          <Typography gutterBottom variant='body2' sx={{ fontWeight: 'bold' }}>
+            Current Saved Cells: {savedAnnotationCount}
+          </Typography>
           <Button 
             variant="contained" 
             color="primary"
