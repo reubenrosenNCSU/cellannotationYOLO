@@ -249,7 +249,7 @@ export default function CellAnnotationTool() {
         })
 
         setImageURL(`${API_BASE_URL}${data.converted_url}`)
-        setImageSize({width: box.width, height: box.height})
+        //setImageSize({width: box.width, height: box.height})
         
     } catch(e) {
       alert('Crop failed: ' + (e.response?.data?.error || e.message))
@@ -661,6 +661,7 @@ export default function CellAnnotationTool() {
 
   async function saveTrainingData() {
     // Normalize annotations
+    console.log(imageSize)
     const normalizedAnnotations = annotations.map(ann => {
       const x_center = parseFloat(((ann.x + ann.w / 2) / imageSize.width).toFixed(6));
       const y_center = parseFloat(((ann.y + ann.h / 2) / imageSize.height).toFixed(6));
