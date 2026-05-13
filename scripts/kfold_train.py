@@ -46,8 +46,8 @@ def main(args):
         write_yaml(yaml_path, args.nc, args.names, fold_dir)
 
         model = YOLO(args.weights)
-        model.train(data=yaml_path, epochs=args.epochs, imgsz=640, batch=4, name=f"fold_{i}", project=fold_dir)
-        val_result = model.val(data=yaml_path)
+        model.train(data=yaml_path, epochs=args.epochs, imgsz=640, batch=4, name=f"fold_{i}", project=fold_dir, workers=0, plots=False)
+        val_result = model.val(data=yaml_path, plots=False, workers=0)
         map50 = val_result.box.map50
         results.append(map50)
         print(f"[FOLD {i}] mAP@0.5 = {map50:.4f}")

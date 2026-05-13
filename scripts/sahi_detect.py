@@ -113,7 +113,7 @@ def predictions_to_yolo(predictions: list, image_width: int, image_height: int) 
         width    = (bbox.maxx - bbox.minx) / image_width
         height   = (bbox.maxy - bbox.miny) / image_height
         lines.append(
-            f"{obj.category.id} {x_center:.6f} {y_center:.6f} {width:.6f} {height:.6f}"
+            f"{obj.category.id} {x_center:.6f} {y_center:.6f} {width:.6f} {height:.6f} {obj.score.value:.4f}"
         )
     return "\n".join(lines)
 

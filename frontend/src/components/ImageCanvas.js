@@ -1,14 +1,30 @@
+import { rgbToHex } from '@mui/material'
 import { useRef, useState, useEffect } from 'react'
 
+const TILE_SIZE = 2048
+const LARGE_IMAGE_THRESHOLD = 16000
+const MAX_VISIBLE_TILES = 36
+
 export default function ImageCanvas({ src, boxes, onAddBox, onRemoveBox, isCropping,
-    onCrop, currentClass, classes, imageSize, brightness, contrast, scale, onScaleChange }) {
+    onCrop, currentClass, classes, imageSize, brightness, contrast, scale, onScaleChange, showLabels = true }) {
   const canvasRef = useRef(null)
   const imgRef = useRef(null)
+  const tilesRef = useRef({})
 
   // pan + zoom state
   const [offset, setOffset] = useState({ x: 0, y: 0 })
   const [isPanning, setIsPanning] = useState(false)
   const [lastPan, setLastPan] = useState({ x: 0, y: 0 })
+
+  const [boundaries, setboundaries] = useState({
+    xMin: 0,
+    xMax: 0,
+    yMin: 0,
+    yMax: 0
+  })
+
+  const [isNewImage, setIsNewImage] = useState(true)
+  const [imageLoaded, setImageLoaded] = useState(false)
 
   const [windowSize, setWindowSize] = useState({
     width: window.innerWidth,
@@ -18,15 +34,46 @@ export default function ImageCanvas({ src, boxes, onAddBox, onRemoveBox, isCropp
   // box drawing state
   const [currentBox, setCurrentBox] = useState(null)
   const [canDraw, setCanDraw] = useState(false)
+  const [tileVersion, setTileVersion] = useState(0)
+
+  const isTiled = imageSize && (imageSize.width > LARGE_IMAGE_THRESHOLD || imageSize.height > LARGE_IMAGE_THRESHOLD)
 
   // load image
   useEffect(() => {
-    const img = new Image()
-    img.src = src
-    img.onload = () => {
-      imgRef.current = img
-      draw()
+    tilesRef.current = {}
+    imgRef.current = null
+    setImageLoaded(false)
+
+    if (!src) return
+
+    if (isTiled) {
+      if (isNewImage) {
+        setboundaries({ xMin: 0, xMax: imageSize.width, yMin: 0, yMax: imageSize.height })
+      }
+      setIsNewImage(true)
+      setImageLoaded(true)
+      return
     }
+
+    const img = new Image()
+    img.onload = () => {
+      console.log('naturalWidth:', img.naturalWidth)
+      console.log('naturalHeight:', img.naturalHeight)
+      console.log('complete:', img.complete)
+      imgRef.current = img
+      if (isNewImage) {
+        setboundaries({xMin: 0, xMax: img.width, yMin: 0, yMax: img.height})
+      }
+      setIsNewImage(true)
+      setImageLoaded(true)
+    }
+
+    img.onerror = () => {
+      console.error('Failed to load image:', src)
+      alert('Image failed to load. The file may be too large for the browser to render.')
+    }
+
+    img.src = src
   }, [src])
 
   // Track window size for rendering
@@ -45,11 +92,19 @@ export default function ImageCanvas({ src, boxes, onAddBox, onRemoveBox, isCropp
   // draw loop
   useEffect(() => {
     draw()
-  }, [scale, offset, boxes, currentBox, classes, brightness, contrast, windowSize])
+  }, [scale, offset, boxes, currentBox, classes, brightness, contrast, windowSize, imageLoaded, tileVersion, showLabels])
+
+  const getLabelTextColor = (hex) => {
+    const r = parseInt(hex.slice(1, 3), 16)
+    const g = parseInt(hex.slice(3, 5), 16)
+    const b = parseInt(hex.slice(5, 7), 16)
+    const luminance = 0.299 * r + 0.587 * g + 0.114 * b
+    return luminance > 160 ? 'black' : 'white'
+  }
 
   const draw = () => {
     const canvas = canvasRef.current
-    if (!canvas || !imgRef.current) return
+    if (!canvas) return
     const ctx = canvas.getContext('2d')
 
     ctx.clearRect(0, 0, canvas.width, canvas.height)
@@ -62,16 +117,82 @@ export default function ImageCanvas({ src, boxes, onAddBox, onRemoveBox, isCropp
     // apply filters
     ctx.filter = `brightness(${100 + +brightness}%) contrast(${100 + +contrast}%)`
 
-    // draw image
-    ctx.drawImage(imgRef.current, 0, 0)
+    if (isTiled) {
+      const visX0 = Math.max(0, -offset.x / scale)
+      const visY0 = Math.max(0, -offset.y / scale)
+      const visX1 = Math.min(imageSize.width, (canvas.width - offset.x) / scale)
+      const visY1 = Math.min(imageSize.height, (canvas.height - offset.y) / scale)
+
+      const txMin = Math.floor(visX0 / TILE_SIZE)
+      const txMax = Math.ceil(visX1 / TILE_SIZE)
+      const tyMin = Math.floor(visY0 / TILE_SIZE)
+      const tyMax = Math.ceil(visY1 / TILE_SIZE)
+      const tileCount = (txMax - txMin) * (tyMax - tyMin)
+
+      if (tileCount > MAX_VISIBLE_TILES) {
+        ctx.restore()
+        ctx.fillStyle = 'white'
+        ctx.font = '20px sans-serif'
+        ctx.textAlign = 'center'
+        ctx.fillText('Zoom in to view image', canvas.width / 2, canvas.height / 2)
+        return
+      }
+
+      const filename = src.split('/').pop()
+
+      for (let ty = tyMin; ty < tyMax; ty++) {
+        for (let tx = txMin; tx < txMax; tx++) {
+          const key = `${tx}_${ty}`
+          const cached = tilesRef.current[key]
+          if (!cached) {
+            tilesRef.current[key] = 'loading'
+            const img = new Image()
+            img.onload = () => {
+              tilesRef.current[key] = img
+              setTileVersion(v => v + 1)
+            }
+            img.onerror = () => { tilesRef.current[key] = 'error' }
+            const baseURL = src ? new URL(src).origin : ''
+            img.src = `${baseURL}/tile/${filename}/${tx}/${ty}/${TILE_SIZE}`
+          } else if (cached !== 'loading' && cached !== 'error') {
+            ctx.drawImage(cached, tx * TILE_SIZE, ty * TILE_SIZE)
+          }
+        }
+      }
+    } else {
+      if (!imgRef.current) {
+        ctx.restore()
+        return
+      }
+      ctx.drawImage(imgRef.current, 0, 0)
+    }
 
     ctx.filter = 'none'
     // draw existing boxes
     ctx.lineWidth = 2 / scale // scale-independent line width
 
+    const fontSize = 11 / scale
+    ctx.font = `${fontSize}px sans-serif`
+
     boxes.forEach((b) => {
-      ctx.strokeStyle = classes[b.class].color
+      const color = classes[b.class].color
+      ctx.strokeStyle = color
       ctx.strokeRect(b.x, b.y, b.w, b.h)
+
+      if (showLabels) {
+        const label = b.confidence != null
+          ? `${classes[b.class].name} ${(b.confidence * 100).toFixed(0)}%`
+          : classes[b.class].name
+        const padding = 2 / scale
+        const textWidth = ctx.measureText(label).width
+        const labelH = fontSize + padding * 2
+        const labelY = b.y - labelH > 0 ? b.y - labelH : b.y
+
+        ctx.fillStyle = color
+        ctx.fillRect(b.x, labelY, textWidth + padding * 2, labelH)
+        ctx.fillStyle = getLabelTextColor(color)
+        ctx.fillText(label, b.x + padding, labelY + fontSize)
+      }
     })
 
     // draw box while dragging
@@ -142,7 +263,7 @@ export default function ImageCanvas({ src, boxes, onAddBox, onRemoveBox, isCropp
       e.clientY - rect.top
     ));
 
-    if (x < 0 || x > imageSize.width || y < 0 || y > imageSize.height) {
+    if (x < boundaries.xMin || x > boundaries.xMax || y < boundaries.yMin || y > boundaries.yMax) {
       setCanDraw(false)
     } else {
       setCanDraw(true)
@@ -150,16 +271,16 @@ export default function ImageCanvas({ src, boxes, onAddBox, onRemoveBox, isCropp
 
     if (currentBox) {
       // Don't allow user to draw outside of the image
-      if (x < 0) {
-        x = 0
-      } else if (x > imageSize.width) {
-        x = imageSize.width
+      if (x < boundaries.xMin) {
+        x = boundaries.xMin
+      } else if (x > boundaries.xMax) {
+        x = boundaries.xMax
       }
 
-      if (y < 0) {
-        y = 0
-      } else if (y > imageSize.height) {
-        y = imageSize.height
+      if (y < boundaries.yMin) {
+        y = boundaries.yMin
+      } else if (y > boundaries.yMax) {
+        y = boundaries.yMax
       }
 
       setCurrentBox((b) => ({
@@ -187,6 +308,15 @@ export default function ImageCanvas({ src, boxes, onAddBox, onRemoveBox, isCropp
       currentBox.class = currentClass
       if (isCropping) {
         onCrop(currentBox)
+        console.log(currentBox)
+        setboundaries({
+          xMin: currentBox.x,
+          xMax: currentBox.x + currentBox.w,
+          yMin: currentBox.y,
+          yMax: currentBox.y + currentBox.h
+        })
+        console.log(boundaries)
+        setIsNewImage(false)
         setCurrentBox(null)
         return
       }
@@ -196,7 +326,7 @@ export default function ImageCanvas({ src, boxes, onAddBox, onRemoveBox, isCropp
   }
 
   const handleWheel = (e) => {
-    e.preventDefault()
+    //e.preventDefault()
     
     const delta = e.deltaY < 0 ? 1.1 : 0.9
 
@@ -220,6 +350,7 @@ export default function ImageCanvas({ src, boxes, onAddBox, onRemoveBox, isCropp
       height={window.innerHeight}
       style={{
         cursor: isPanning ? 'grabbing': canDraw ? 'crosshair': 'not-allowed',
+        background: 'rgba(0, 0, 0, 1)',
       }}
       onMouseDown={handleMouseDown}
       onMouseMove={handleMouseMove}

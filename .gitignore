@@ -1,5 +1,7 @@
-snapshots/MADM_v3.pt
-snapshots/SGN_best.pt
+snapshots
 __pycache__/
 users
 runs
+instance/biolab.db
+app_dev.py
+remap.py

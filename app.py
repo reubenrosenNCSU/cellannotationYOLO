@@ -11,6 +11,7 @@ from PIL import Image, ImageOps
 import numpy as np
 import zipfile
 import io
+import tempfile
 import gc  # Garbage collector
 import time  # For delays
 from flask import session
@@ -25,6 +26,7 @@ from ultralytics import YOLO
 from scripts.normalization import normalize_image
 from scripts.sahi_detect import detect_to_yolo
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))  # Gets directory where app.py is
+os.chdir(BASE_DIR)
 from PIL import Image
 import tifffile
 from flask_sqlalchemy import SQLAlchemy
@@ -103,7 +105,7 @@ def set_user_session():
         os.makedirs(dir_path, exist_ok=True)
 
 
-def preprocess_image(image_path, upload_dir, detection_type, cell_diameter):
+def preprocess_image(image_path, upload_dir, detection_type, cell_diameter, p_low=None, p_high=None):
     """
     Standardizes any input image (TIFF/PNG/JPG) for the YOLO model.
     Returns: (path_to_detection_image, det_w, det_h, scaling_factor)
@@ -111,10 +113,10 @@ def preprocess_image(image_path, upload_dir, detection_type, cell_diameter):
     # 1. Generate unique IDs to prevent race conditions
     img_uuid = uuid.uuid4().hex[:8]
     base_name = os.path.splitext(os.path.basename(image_path))[0]
-    
+
     # 2. Normalize (Detection-only copy)
     normalized_path = os.path.join(upload_dir, f"norm_{img_uuid}_{base_name}.png")
-    normalize_image(image_path, normalized_path)
+    normalize_image(image_path, normalized_path, p_low=p_low, p_high=p_high)
 
     # 3. Calculate Scaling
     target_diameter = 20.0 if detection_type == 'CD3' else 34.0
@@ -345,8 +347,21 @@ def export_annotations():
     try:
         # Get both CSV data and current image name from request
         data = request.json
-        yolo_data = data['yolo_data']  # Changed from csv_data
+        yolo_data = data['yolo_data']
         original_filename = data['original_filename']
+        annotations_only = data.get('annotations_only', False)
+        base_name = os.path.splitext(original_filename)[0]
+
+        if annotations_only:
+            txt_buffer = io.BytesIO(yolo_data.encode('utf-8'))
+            txt_buffer.seek(0)
+            return send_file(
+                txt_buffer,
+                mimetype='text/plain',
+                as_attachment=True,
+                download_name=f'{base_name}.txt'
+            )
+
         user_upload_dir = os.path.join('users', user_id, 'uploads')
 
         # Get current TIFF path
@@ -357,10 +372,8 @@ def export_annotations():
         # Create in-memory ZIP file
         zip_buffer = io.BytesIO()
         with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zipf:
-            # Add YOLO txt file instead of CSV
-            txt_filename = f"{os.path.splitext(original_filename)[0]}.txt"
+            txt_filename = f"{base_name}.txt"
             zipf.writestr(txt_filename, yolo_data)
-            # Add TIFF
             zipf.write(tiff_path, os.path.basename(tiff_path))
 
         zip_buffer.seek(0)
@@ -369,7 +382,7 @@ def export_annotations():
             zip_buffer,
             mimetype='application/zip',
             as_attachment=True,
-            download_name=f'{os.path.splitext(original_filename)[0]}_export.zip'
+            download_name=f'{base_name}_export.zip'
         )
 
     except Exception as e:
@@ -416,7 +429,41 @@ def upload_cropped_file():
     except Exception as e:
         print(f"Error in upload-cropped: {str(e)}")
         return jsonify({'error': f"Server error: {str(e)}"}), 500
-    
+
+
+@app.route('/preview-tiff', methods=['POST'])
+def preview_tiff():
+    tmp_in_path = None
+    tmp_out_path = None
+    try:
+        file = request.files.get('file')
+        if not file:
+            return jsonify({'error': 'No file provided'}), 400
+
+        with tempfile.NamedTemporaryFile(suffix='.tiff', delete=False) as tmp_in:
+            file.save(tmp_in.name)
+            tmp_in_path = tmp_in.name
+
+        with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as tmp_out:
+            tmp_out_path = tmp_out.name
+
+        normalize_image(tmp_in_path, tmp_out_path)
+
+        with open(tmp_out_path, 'rb') as f:
+            buf = io.BytesIO(f.read())
+
+        return send_file(buf, mimetype='image/png')
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+    finally:
+        if tmp_in_path and os.path.exists(tmp_in_path):
+            os.remove(tmp_in_path)
+        if tmp_out_path and os.path.exists(tmp_out_path):
+            os.remove(tmp_out_path)
+
+
 from scripts.detect_tiles import detect_tiles_in_batch
 
 
@@ -425,6 +472,25 @@ def serve_converted(filename):
     user_id = session['user_id']
     converted_dir = os.path.join('users', user_id, 'converted')
     return send_from_directory(converted_dir, filename)
+
+@app.route('/tile/<filename>/<int:tx>/<int:ty>/<int:tile_size>')
+def serve_tile(filename, tx, ty, tile_size):
+    user_id = session['user_id']
+    filename = secure_filename(filename)
+    path = os.path.join('users', user_id, 'converted', filename)
+    if not os.path.exists(path):
+        return jsonify({'error': 'File not found'}), 404
+    x = tx * tile_size
+    y = ty * tile_size
+    with Image.open(path) as img:
+        w, h = img.size
+        if x >= w or y >= h:
+            return jsonify({'error': 'Tile out of bounds'}), 400
+        tile = img.crop((x, y, min(x + tile_size, w), min(y + tile_size, h)))
+    buf = io.BytesIO()
+    tile.save(buf, 'PNG')
+    buf.seek(0)
+    return send_file(buf, mimetype='image/png')
 
 @app.route('/save-training-data', methods=['POST'])
 def save_training_data():
@@ -468,16 +534,12 @@ def save_training_data():
         
         # Class mapping
         CLASS_MAP = {
-            "SGN": 0,
-            "yellow neuron": 1,
-            "yellow astrocyte": 2,
-            "green neuron": 3,
-            "green astrocyte": 4,
-            "red neuron": 5,
-            "red astrocyte": 6,
-            "CD3": 7
+            'neuron': 0,
+            'glia':   1,
+            'SGN':    0,  # only used when training SGN model separately
+            'CD3':    0,  # only used when training CD3 model separately
         }
-        
+                
         # Create YOLO annotations with consistent formatting (already in original coordinates)
         yolo_lines = []
         for ann in annotations:
@@ -670,9 +732,10 @@ def detect_madm():
             return jsonify({'error': 'No image found. Upload an image first.'}), 400
 
         image_path = os.path.join(upload_dir, files[0])
-        model_path = 'snapshots/MADM_v3.pt'
+        model_path = 'snapshots/MADM_best_latest.pt'
 
-        prep_data = preprocess_image(image_path, upload_dir, 'MADM', cell_diameter)
+        prep_data = preprocess_image(image_path, upload_dir, 'MADM', cell_diameter,
+                                     p_low=session.get('norm_p_low'), p_high=session.get('norm_p_high'))
 
         with Image.open(image_path) as img:
             image_width, image_height = img.size
@@ -698,7 +761,10 @@ def detect_madm():
         })
 
     except Exception as e:
-        return jsonify({'error': f'Detection failed: {str(e)}'}), 500
+        import traceback
+        error_details = traceback.format_exc()
+        print(error_details) # Check your terminal for this!
+        return jsonify({'error': str(e), 'traceback': error_details}), 500
 
 
 @app.route('/detect-sgn', methods=['POST'])
@@ -716,8 +782,10 @@ def detect_sgn():
             return jsonify({'error': 'No image found. Upload an image first.'}), 400
 
         image_path = os.path.join(upload_dir, files[0])
+        model_path = 'snapshots/SGN_best.pt'
 
-        prep_data = preprocess_image(image_path, upload_dir, 'SGN', cell_diameter)
+        prep_data = preprocess_image(image_path, upload_dir, 'SGN', cell_diameter,
+                                     p_low=session.get('norm_p_low'), p_high=session.get('norm_p_high'))
 
         with Image.open(image_path) as img:
             image_width, image_height = img.size
@@ -732,6 +800,9 @@ def detect_sgn():
 
         with open(merged_output_path, 'w') as f:
             f.write(final_annotation)
+        
+        if os.path.exists(prep_data['path']):
+            os.remove(prep_data['path'])
 
         return jsonify({
             "annotations": final_annotation,
@@ -740,7 +811,10 @@ def detect_sgn():
         })
 
     except Exception as e:
-        return jsonify({'error': f'Detection failed: {str(e)}'}), 500
+        import traceback
+        error_details = traceback.format_exc()
+        print(error_details) # Check your terminal for this!
+        return jsonify({'error': str(e), 'traceback': error_details}), 500
 
 
 @app.route('/detect-cd3', methods=['POST'])
@@ -759,7 +833,8 @@ def detect_cd3():
 
         image_path = os.path.join(upload_dir, files[0])
 
-        prep_data = preprocess_image(image_path, upload_dir, 'CD3', cell_diameter)
+        prep_data = preprocess_image(image_path, upload_dir, 'CD3', cell_diameter,
+                                     p_low=session.get('norm_p_low'), p_high=session.get('norm_p_high'))
 
         with Image.open(image_path) as img:
             image_width, image_height = img.size
@@ -816,7 +891,7 @@ def train_saved_data():
         
 
         # --- 3. Copy SAVED DATA (uploaded manually) ---
-# --- 3. COPY SAVED DATA (uploaded images + annotations) ---
+        # --- 3. COPY SAVED DATA (uploaded images + annotations) ---
         print("[DEBUG] Copying saved training data...")
 
         saved_data_dir = os.path.join('users', user_id, 'saved_data')
@@ -934,19 +1009,7 @@ def train_saved_data():
             # Hard-code CD3 at index 7 (with dummies at 0–6)
             class_names = [f"dummy{i}" for i in range(7)] + ["CD3"]
         elif model_type == 'MADM':
-            # ❗ ADDED: Explicitly define MADM class names
-            # These should match the classes your MADM model is designed to detect.
-            # This list is derived from your CLASS_MAP in the /save-training-data route.
-            class_names = [
-                "SGN", 
-                "yellow neuron", 
-                "yellow astrocyte", 
-                "green neuron", 
-                "green astrocyte", 
-                "red neuron", 
-                "red astrocyte",
-                "CD3"
-            ]
+            class_names = ["neuron", "glia"]
         else:
             # Fallback for any unexpected model type
             return jsonify({'error': f'Unsupported model type for training: {model_type}'}), 400
@@ -964,19 +1027,22 @@ def train_saved_data():
         print(f"[DEBUG] data.yaml written with nc={nc}, names={class_names}")
 
         # --- 6. Train model ---
-        weights = 'snapshots/SGN_best.pt' if model_type == 'SGN' else 'snapshots/cd3_v3.pt' if model_type == 'CD3' else 'snapshots/MADM_v3.pt'
+        weights = 'snapshots/SGN_best.pt' if model_type == 'SGN' else 'snapshots/cd3_v3.pt' if model_type == 'CD3' else 'snapshots/MADM_best_latest.pt'
         run_name = f"run_{int(time.time())}"
         print(f"[DEBUG] Starting YOLO train, weights={weights}, run name={run_name}")
-        model = YOLO(weights)
-        model.train(
-            data=yaml_path,
-            epochs=epochs,
-            imgsz=640,
-            batch=4,
-            project=snapshot_dir,
-            name=run_name,
-            save=True
-        )
+        import subprocess, sys
+
+        train_cmd = [
+            sys.executable, 'scripts/run_train.py',
+            '--data',    yaml_path,
+            '--weights', weights,
+            '--epochs',  str(epochs),
+            '--project', snapshot_dir,
+            '--name',    run_name,
+        ]
+
+        print(f"[DEBUG] Launching training subprocess: {' '.join(train_cmd)}")
+        result = subprocess.run(train_cmd, check=True, capture_output=False)
 
         best = os.path.join(snapshot_dir, run_name, 'weights', 'best.pt')
         time.sleep(3)
@@ -1006,7 +1072,7 @@ def train_saved_data():
         os.makedirs(kfold_dir, exist_ok=True)
 
         cmd = [
-            'python3', 'scripts/kfold_train.py',
+            sys.executable, 'scripts/kfold_train.py',  # ← inherits the correct env
             '--image_dir', img_dir,
             '--label_dir', lbl_dir,
             '--weights', best,
@@ -1044,6 +1110,7 @@ def detect_custom():
     
     threshold = float(request.form.get('threshold', 0.5))
     cell_diameter = float(request.form.get('cell_diameter', 34))
+    model_type = request.form.get('model_type', 'SGN')
 
     try:
         pt_file = request.files['pt_file']
@@ -1055,8 +1122,9 @@ def detect_custom():
             return jsonify({'error': 'No image found in uploads.'}), 400
         image_path = os.path.join(upload_dir, files[0])
 
-        prep_data = preprocess_image(image_path, upload_dir, 'SGN', cell_diameter)
-        
+        prep_data = preprocess_image(image_path, upload_dir, model_type, cell_diameter,
+                                     p_low=session.get('norm_p_low'), p_high=session.get('norm_p_high'))
+
         with Image.open(image_path) as img:
             orig_w, orig_h = img.size
         
@@ -1144,22 +1212,48 @@ def detect_finetuned():
     user_id = session['user_id']
     try:
         model_type = request.json.get('model_type', 'SGN')
+        threshold = float(request.json.get('threshold', 0.5))
+        cell_diameter = float(request.json.get('cell_diameter', 34))
+
         model_path = os.path.join('users', user_id, 'snapshots', f'{model_type}_finetuned.pt')
         if not os.path.exists(model_path):
-            return jsonify({'error': 'No trained model found'}), 400
-        
-        annotations, img_width, img_height, error = detect_with_tiling(user_id, model_path)
-        if error:
-            return jsonify({'error': error}), 500
+            return jsonify({'error': f'No fine-tuned {model_type} model found. Train one first.'}), 400
+
+        upload_dir = os.path.join('users', user_id, 'uploads')
+        files = [f for f in os.listdir(upload_dir) if f.lower().endswith(('.tif', '.tiff', '.png', '.jpg', '.jpeg'))]
+        if not files:
+            return jsonify({'error': 'No image found. Upload an image first.'}), 400
+
+        image_path = os.path.join(upload_dir, files[0])
+
+        prep_data = preprocess_image(image_path, upload_dir, model_type, cell_diameter,
+                                     p_low=session.get('norm_p_low'), p_high=session.get('norm_p_high'))
+
+        with Image.open(image_path) as img:
+            image_width, image_height = img.size
+
+        final_annotation = detect_to_yolo(
+            image_path=prep_data['path'],
+            model_path=model_path,
+            image_width=prep_data['det_w'],
+            image_height=prep_data['det_h'],
+            threshold=threshold,
+        )
+
+        if os.path.exists(prep_data['path']):
+            os.remove(prep_data['path'])
 
         return jsonify({
-            "annotations": annotations,
-            "image_width": img_width,
-            "image_height": img_height
+            "annotations": final_annotation,
+            "image_width": image_width,
+            "image_height": image_height
         })
 
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        import traceback
+        error_details = traceback.format_exc()
+        print(error_details)
+        return jsonify({'error': str(e), 'traceback': error_details}), 500
 
 
 @app.route('/batch-detect', methods=['POST'])
@@ -1204,7 +1298,7 @@ def batch_detect():
         results = []
         model_map = {
             'SGN': 'snapshots/SGN_best.pt',
-            'MADM': 'snapshots/MADM_v3.pt',
+            'MADM': 'snapshots/MADM_best_latest.pt',
             'CD3': 'snapshots/cd3_v3.pt'
         }
         active_model = model_path or model_map.get(detection_type)

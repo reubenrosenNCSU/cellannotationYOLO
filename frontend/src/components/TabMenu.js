@@ -10,6 +10,7 @@ export default function TabMenu({ items }) {
 				value={value}
 				onChange={(e, v) => setValue(v)}
 				orientation="horizontal"
+				centered
 				//sx={{ borderRight: 1, borderColor: "divider" }}
 			>
 				{items.map((item, idx) => (
