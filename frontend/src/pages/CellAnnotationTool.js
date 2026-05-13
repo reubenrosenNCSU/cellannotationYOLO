@@ -20,11 +20,12 @@ import CellCalibrator from '../components/CellCalibrator'
 
 export default function CellAnnotationTool() {
   // Base URL for the backend API
-  const API_BASE_URL = 'http://10.80.24.12:5001'
+  const API_BASE_URL = 'http://10.80.24.12:5002'
 
   const [isLoading, setIsLoading] = useState(false)
 
   // State for image operations
+  const [imageID, setImageID] = useState('')
   const [imageURL, setImageURL] = useState('')
   const [imageName, setImageName] = useState('')
   const [imageSize, setImageSize] = useState({width: 0, height: 0})
@@ -39,29 +40,32 @@ export default function CellAnnotationTool() {
 
   // State for annotations
   const [annotations, setAnnotations] = useState([])
-  const [classes, setClasses] = useState([
+  const [classes, setClasses] = useState([])
+  const [currentClass, setCurrentClass] = useState(0)
+  const [classes_old, setClasses_old] = useState([
     { name: 'Neuron', color: '#60A5FA' },  // index 0 = MADM class 0
     { name: 'Glia',   color: '#F59E0B' },  // index 1 = MADM class 1
     { name: 'SGN',    color: '#CA00BC' },  // index 2 = SGN model
     { name: 'CD3',    color: '#600089' },  // index 3 = CD3 model
   ])
-  const [currentClass, setCurrentClass] = useState(0)
+  const [currentClass_old, setCurrentClass_old] = useState(0)
   const [undoStack, setUndoStack] = useState([])
 
   // State for model selection and detection settings
-  const [models] = useState(['SGN', 'CD3', 'MADM', 'Custom'])
+  const [models, setModels] = useState([])
   const [currentModel, setCurrentModel] = useState(0)
+  const [models_old] = useState(['SGN', 'CD3', 'MADM', 'Custom'])
+  const [currentModel_old, setCurrentModel_old] = useState(0)
   const [threshold, setThreshold] = useState(.5)
   const [cellDiameter, setCellDiameter] = useState(34)
   const [detectedDiameter, setDetectedDiameter] = useState(0)
   // State for custom model upload
   const [customModel, setCustomModel] = useState()
-  const [modelTypes] = useState(['SGN', 'CD3', 'MADM'])
+  const [modelTypes] = useState(['MADM', 'SGN', 'Other'])
   const [customModelType, setCustomModelType] = useState('')
   const [customModelName, setCustomModelName] = useState('')
-  const [lastCustomModel, setLastCustomModel] = useState()
-  const [lastCustomModelType, setLastCustomModelType] = useState('')
-  const [lastCustomModelName, setLastCustomModelName] = useState('')
+  const [customModelFilename, setCustomModelFilename] = useState('')
+
   // State for batch detection
   const [selectedFiles, setSelectedFiles] = useState([])
   const [batchThumbnails, setBatchThumbnails] = useState({})
@@ -87,8 +91,22 @@ export default function CellAnnotationTool() {
     }
 
     console.log(annotations)
-    console.log(currentModel)
+    console.log(currentModel_old)
   }, [annotations])
+
+  useEffect(() => {
+    fetch(`${API_BASE_URL}/user-images`, { credentials: 'include' })
+    .then(res => res.json()).then(console.log)
+    fetch(`${API_BASE_URL}/user-weights`, { credentials: 'include' })
+    .then(res => res.json())
+    .then(data => {
+      setModels(data)
+      setCurrentModel(0)
+      console.log(data[0].label_set.labels)
+      setClasses(data[0].label_set.labels)
+      setCurrentClass(0)
+    })
+  }, []);
 
   useEffect(() => {
     fetch(`${API_BASE_URL}/get-all-training-data`, { credentials: 'include' })
@@ -97,7 +115,7 @@ export default function CellAnnotationTool() {
         // data is the array of objects from Python
         setTrainingData(data);
       })
-      .catch(err => console.error("Error loading gallery:", err));
+      .catch(err => console.error("Error loading gallery:", err))
   }, []);
 
   useEffect(() => {
@@ -143,6 +161,7 @@ export default function CellAnnotationTool() {
 
         if (!res.ok) throw new Error('Upload failed')
         const data = await res.json()
+        setImageID(data.image_id)
         setImageURL(`${API_BASE_URL}${data.converted_url}`)
         setImageSize({width: data.dimensions[0], height: data.dimensions[1]})
         setAnnotations([])
@@ -198,7 +217,7 @@ export default function CellAnnotationTool() {
       ctx.lineWidth = 2
 
       annotations.forEach((a) => {
-        ctx.strokeStyle = classes[a.class].color
+        ctx.strokeStyle = classes_old[a.class].color
         ctx.strokeRect(a.x, a.y, a.w, a.h)
       })
 
@@ -219,7 +238,7 @@ export default function CellAnnotationTool() {
 
   async function handleCrop(box) {
     const formData = new FormData()
-    formData.append('original_filename', `${imageName}`)
+    formData.append('image_id', `${imageID}`)
     formData.append('x', Math.round(box.x))
     formData.append('y', Math.round(box.y))
     formData.append('width', Math.round(box.w))
@@ -248,7 +267,8 @@ export default function CellAnnotationTool() {
           })
         })
 
-        setImageURL(`${API_BASE_URL}${data.converted_url}`)
+        // Add a timestamp as a query parameter (?t=123456789)
+        setImageURL(`${API_BASE_URL}${data.converted_url}?t=${new Date().getTime()}`)
         //setImageSize({width: box.width, height: box.height})
         
     } catch(e) {
@@ -288,7 +308,7 @@ export default function CellAnnotationTool() {
   }
 
   const handleColorUpdate = (index, newColor) => {
-    setClasses((prevClasses) => {
+    setClasses_old((prevClasses) => {
       // Create a copy of the array to maintain immutability
       const updated = [...prevClasses]
       updated[index] = { ...updated[index], color: newColor }
@@ -427,13 +447,13 @@ export default function CellAnnotationTool() {
     let payload = null
     let headers = {}
 
-    if (currentModel === 0) {
+    if (currentModel_old === 0) {
       endpoint = `${API_BASE_URL}/detect-sgn`
-    } else if (currentModel === 1) {
+    } else if (currentModel_old === 1) {
       endpoint = `${API_BASE_URL}/detect-cd3`
-    } else if (currentModel === 2) {
+    } else if (currentModel_old === 2) {
       endpoint = `${API_BASE_URL}/detect-madm`
-    } else if (currentModel === 3) {
+    } else if (currentModel_old === 3) {
       if (!customModel) {
         alert('Please upload a custom model (.pt)')
         return
@@ -468,7 +488,7 @@ export default function CellAnnotationTool() {
         credentials: 'include',
       })
       console.log(res)
-      if (!res.ok) throw new Error(`${models[currentModel]} detection failed`)
+      if (!res.ok) throw new Error(`${models_old[currentModel_old]} detection failed`)
       const data = await res.json()
       
       const yoloTxt = data.annotations
@@ -491,14 +511,14 @@ export default function CellAnnotationTool() {
         const confidence = parts[5] ? parseFloat(parts[5]) : null
 
         let annotationClass = cls
-        if (currentModel === 0) {
+        if (currentModel_old === 0) {
           annotationClass = 2
         }
         handleAddBox({x: x1, y: y1, w: w, h: h, class: annotationClass, confidence})
 
         importedCount++
       })
-      alert(`Detected ${importedCount} ${models[currentModel]} objects!`)
+      alert(`Detected ${importedCount} ${models_old[currentModel_old]} objects!`)
     } catch (e) {
       alert('Detection failed: ' + (e.response?.data?.error || e.message))
     } finally {
@@ -511,13 +531,13 @@ export default function CellAnnotationTool() {
 
     const formData = new FormData();
 
-    if (currentModel === 0) {
+    if (currentModel_old === 0) {
       formData.append('detection_type', 'SGN')
-    } else if (currentModel === 1) {
+    } else if (currentModel_old === 1) {
       formData.append('detection_type', 'CD3')
-    } else if (currentModel === 2) {
+    } else if (currentModel_old === 2) {
       formData.append('detection_type', 'MADM')
-    } else if (currentModel === 3) {
+    } else if (currentModel_old === 3) {
       if (!customModel) {
         alert('Please upload a custom model (.pt)')
         return
@@ -541,7 +561,7 @@ export default function CellAnnotationTool() {
         credentials: 'include',
       });
 
-      if (!res.ok) throw new Error(`${models[currentModel]} batch detection failed`)
+      if (!res.ok) throw new Error(`${models_old[currentModel_old]} batch detection failed`)
       
       const blob = await res.blob();
       const url = window.URL.createObjectURL(blob);
@@ -564,7 +584,9 @@ export default function CellAnnotationTool() {
     }
   }
 
-  function handleLoadCustomModel(e) {
+  // *----------* Model Operations *----------* \\
+
+  function handleChooseCustomModel(e) {
     const file = e.target.files[0]
     e.target.value = null
     if (!file) return
@@ -576,13 +598,12 @@ export default function CellAnnotationTool() {
     }
     
     setCustomModel(file)
-    setCustomModelName(file.name)
-    console.log(customModel)
+    setCustomModelFilename(file.name)
   }
 
-  function confirmCustom() {
+  async function handleUploadCustomModel() {
     if (!customModel) {
-      alert('Please upload a custom model (.pt)')
+      alert('Please choose a model to upload')
       return
     }
 
@@ -590,18 +611,41 @@ export default function CellAnnotationTool() {
       alert('Please choose a model type')
       return
     }
+
+    if (customModelName === '') {
+      alert('Please choose a model name')
+      return
+    }
     
-    setLastCustomModel(customModel)
-    setLastCustomModelName(customModelName)
-    setLastCustomModelType(customModelType)
+    const formData = new FormData()
+    formData.append('model', customModel)
+    formData.append('name', customModelName)
+    formData.append('type', customModelType)
+
+    setIsLoading(true)
+    try {
+        const res = await fetch(`${API_BASE_URL}/upload-custom-model`, {
+          method: 'POST',
+          body: formData,
+          credentials: 'include',
+        })
+
+        if (!res.ok) throw new Error('Model upload failed')
+        const data = await res.json()
+        console.log(data)
+    } catch(e) {
+      alert('Model upload failed: ' + (e.response?.data?.error || e.message))
+    } finally {
+      setIsLoading(false)
+    }
 
     handleCloseCustomUploadModal()
   }
 
   function cancelCustom() {
-    setCustomModel(lastCustomModel)
-    setCustomModelName(lastCustomModelName)
-    setCustomModelType(lastCustomModelType)
+    setCustomModelName('')
+    setCustomModelType('')
+    setCustomModelFilename('')
 
     handleCloseCustomUploadModal()
   }
@@ -649,7 +693,7 @@ export default function CellAnnotationTool() {
         importedCount++
       })
 
-      alert(`Detected ${importedCount} ${models[currentModel]} objects!`)
+      alert(`Detected ${importedCount} ${models_old[currentModel_old]} objects!`)
     } catch (e) {
       alert('Fine tuned detection failed: ' + (e.response?.data?.error || e.message))
     } finally {
@@ -667,7 +711,7 @@ export default function CellAnnotationTool() {
       const y_center = parseFloat(((ann.y + ann.h / 2) / imageSize.height).toFixed(6));
       const width_norm = parseFloat((ann.w / imageSize.width).toFixed(6));
       const height_norm = parseFloat((ann.h / imageSize.height).toFixed(6));
-      let class_name = classes[ann.class].name
+      let class_name = classes_old[ann.class].name
       if (ann.class < 2) {
         class_name = class_name.toLowerCase()
       }
@@ -858,7 +902,7 @@ export default function CellAnnotationTool() {
               const y = (y_norm * height) - (h / 2)
               
               let annotationClass = classId
-              if (currentModel === 0) annotationClass = 2 //TODO: Find better way to check model of saved entry, current model may not be the same as the entry
+              if (currentModel_old === 0) annotationClass = 2 //TODO: Find better way to check model of saved entry, current model may not be the same as the entry
               return {
                   id: Math.random().toString(36).substr(2, 9),
                   class: annotationClass,
@@ -1046,14 +1090,37 @@ export default function CellAnnotationTool() {
           <PopupState variant='popover' popupId='class-popup-menu'>
             {(popupState) => (
               <Fragment>
-                <Button variant='contained' {...bindTrigger(popupState)} endIcon={<KeyboardArrowDownIcon />} sx={{...button_style_span, mt: 1}}>
-                  {classes[currentClass].name}
+                <Button variant='contained' {...bindTrigger(popupState)} 
+                  endIcon={<KeyboardArrowDownIcon />} 
+                  sx={{...button_style_span, mt: 1}}
+                  disabled={classes.length === 0}
+                >
+                  {classes.length > 0 ? classes[currentClass] : "No Classes Available"}
                 </Button>
                 <Menu {...bindMenu(popupState)}>
                   {classes.map((item, index) => (
                     <MenuItem 
                       key={index}
-                      onClick={() => {setCurrentClass(index)}}
+                      onClick={() => {currentClass(index)}}
+                    >
+                        <Typography variant='body1'>{item}</Typography>
+                    </MenuItem>
+                  ))}
+                </Menu>
+              </Fragment>
+            )}
+          </PopupState>
+          <PopupState variant='popover' popupId='class-popup-menu'>
+            {(popupState) => (
+              <Fragment>
+                <Button variant='contained' {...bindTrigger(popupState)} endIcon={<KeyboardArrowDownIcon />} sx={{...button_style_span, mt: 1}}>
+                  {classes_old[currentClass_old].name}
+                </Button>
+                <Menu {...bindMenu(popupState)}>
+                  {classes_old.map((item, index) => (
+                    <MenuItem 
+                      key={index}
+                      onClick={() => {setCurrentClass_old(index)}}
                     >
                         <Typography variant='body1'>{item.name}</Typography>
                     </MenuItem>
@@ -1063,7 +1130,7 @@ export default function CellAnnotationTool() {
             )}
           </PopupState>
           <ColorMenu 
-            items={classes} 
+            items={classes_old} 
             onChange={handleColorUpdate} 
           />
           <Box sx={{pt: 1, borderTop: 1, borderColor: 'grey.500'}}>
@@ -1242,13 +1309,13 @@ export default function CellAnnotationTool() {
             {(popupState) => (
               <Fragment>
                 <Button variant='contained' {...bindTrigger(popupState)} endIcon={<KeyboardArrowDownIcon />} sx={{...button_style_span, mt: 1}}>
-                  {models[currentModel]}
+                  {models_old[currentModel_old]}
                 </Button>
                 <Menu {...bindMenu(popupState)}>
-                  {models.map((item, index) => (
+                  {models_old.map((item, index) => (
                     <MenuItem 
                       key={index}
-                      onClick={() => {setCurrentModel(index)}}
+                      onClick={() => {setCurrentModel_old(index)}}
                     >
                         <Typography variant='body1'>{item}</Typography>
                     </MenuItem>
@@ -1260,21 +1327,28 @@ export default function CellAnnotationTool() {
           <Button variant='contained' component='label' onClick={handleOpenCustomUploadModal} sx={{...button_style_span}}>
             Load Custom
           </Button>
-          <Typography gutterBottom variant='body2' sx={{ fontWeight: 'bold' }}>
-            Selected Model: {lastCustomModelName}
+          {/* <Typography gutterBottom variant='body2' sx={{ fontWeight: 'bold' }}>
+            Selected Model: {customModelFilename}
           </Typography>
           <Typography gutterBottom variant='body2' sx={{ fontWeight: 'bold' }}>
             Model Type: {lastCustomModelType}
-          </Typography>
+          </Typography> */}
           <Modal
             open={customUploadModalOpen}
             onClose={cancelCustom}
           >
             <Box sx={{...modal_style}}>
               <Typography>Load Custom Model</Typography>
+              <TextField
+                label="Model Name"
+                variant="outlined"
+                fullWidth
+                value={customModelName}
+                onChange={(e) => setCustomModelName(e.target.value)}
+              />
               <Button variant='contained' component='label'>
                 Select File
-                <input hidden type='file' accept='.pt' onChange={handleLoadCustomModel} />
+                <input hidden type='file' accept='.pt' onChange={handleChooseCustomModel} />
               </Button>
               <PopupState variant='popover' popupId='model-popup-menu'>
                 {(popupState) => (
@@ -1295,8 +1369,8 @@ export default function CellAnnotationTool() {
                   </Fragment>
                 )}
               </PopupState>
-              <Typography>Selected: {customModelName}</Typography>
-              <Button onClick={confirmCustom}>Confirm</Button>
+              <Typography>Selected: {customModelFilename}</Typography>
+              <Button onClick={handleUploadCustomModel}>Confirm</Button>
               <Button onClick={cancelCustom}>Cancel</Button>
             </Box>
           </Modal>
@@ -1451,11 +1525,11 @@ export default function CellAnnotationTool() {
             {(popupState) => (
               <Fragment>
                 <Button variant='contained' {...bindTrigger(popupState)} endIcon={<KeyboardArrowDownIcon />} sx={{ ...button_style_span, mt: 1 }}>
-                  {models[currentModel]}
+                  {models_old[currentModel_old]}
                 </Button>
                 <Menu {...bindMenu(popupState)}>
-                  {models.map((item, index) => (
-                    <MenuItem key={index} onClick={() => setCurrentModel(index)}>
+                  {models_old.map((item, index) => (
+                    <MenuItem key={index} onClick={() => setCurrentModel_old(index)}>
                       <Typography variant='body1'>{item}</Typography>
                     </MenuItem>
                   ))}
@@ -1544,8 +1618,11 @@ export default function CellAnnotationTool() {
             Cell Annotation Tool (CAT🐱)
         </Typography>
         <Button variant='contained' component='label' sx={{...button_style_span}}>
-          Load Image
+          Upload Image
           <input hidden type='file' accept='image/tiff' onChange={handleUpload}/>
+        </Button>
+        <Button variant='contained' component='label' onClick={handleSave} sx={{...button_style_span}}>
+          Open Image
         </Button>
         <Button variant='contained' component='label' onClick={handleSave} sx={{...button_style_span}}>
           Save Image
@@ -1574,7 +1651,29 @@ export default function CellAnnotationTool() {
             setMax={setCMax}
           />
         </Stack>
-
+        <PopupState variant='popover' popupId='model-popup-menu'>
+          {(popupState) => (
+            <Fragment>
+              <Button 
+                variant='contained' 
+                {...bindTrigger(popupState)} 
+                disabled={models.length === 0} // Disable if no models yet
+                endIcon={<KeyboardArrowDownIcon />} 
+                sx={{ ...button_style_span, mt: 1 }}
+              >
+                {models.length > 0 ? models[currentModel].name : "No Models Available"}
+              </Button>
+              <Menu {...bindMenu(popupState)}>
+                {models.map((item, index) => (
+                  <MenuItem key={index} onClick={() => {setCurrentModel(index); setClasses(models[index].label_set.labels)}}>
+                    <Typography variant='body1'>{item.name}</Typography>
+                  </MenuItem>
+                ))}
+              </Menu>
+            </Fragment>
+          )}
+        </PopupState>
+        
         <TabMenu items={tabs}></TabMenu>
       </SideMenu>
 
@@ -1596,7 +1695,7 @@ export default function CellAnnotationTool() {
         <Box sx={{ flexGrow: 1, display: 'flex', justifyContent: 'center', bgcolor: '#111' }}>
           <ImageCanvas src={imageURL} boxes={annotations} onAddBox={handleAddBox}
             onRemoveBox={handleRemoveBox} isCropping={isCropping} onCrop={handleCrop}
-            currentClass={currentClass} classes={classes} imageSize={imageSize}
+            currentClass={currentClass_old} classes={classes_old} imageSize={imageSize}
             brightness={brightness} contrast={contrast}
             scale={scale} onScaleChange={setScale} showLabels={showLabels}/>
         </Box>
