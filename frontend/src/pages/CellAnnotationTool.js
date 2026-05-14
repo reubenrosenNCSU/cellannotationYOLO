@@ -17,6 +17,7 @@ import ColorMenu from '../components/ColorMenu'
 import AdjustableSlider from '../components/AdjustableSlider'
 import MetricsChart from '../components/MetricsChart'
 import CellCalibrator from '../components/CellCalibrator'
+import GalleryMenu from '../components/GalleryMenu'
 
 export default function CellAnnotationTool() {
   // Base URL for the backend API
@@ -25,6 +26,7 @@ export default function CellAnnotationTool() {
   const [isLoading, setIsLoading] = useState(false)
 
   // State for image operations
+  const [imageList, setImageList] = useState([])
   const [imageID, setImageID] = useState('')
   const [imageURL, setImageURL] = useState('')
   const [imageName, setImageName] = useState('')
@@ -96,7 +98,17 @@ export default function CellAnnotationTool() {
 
   useEffect(() => {
     fetch(`${API_BASE_URL}/user-images`, { credentials: 'include' })
-    .then(res => res.json()).then(console.log)
+    .then(res => res.json())
+    .then(data => {
+      const formattedData = data.map(item => ({
+        ...item,
+        // Prepend the base URL
+        url: `${API_BASE_URL}${item.url}`
+      }));
+
+      setImageList(formattedData);
+      console.log(formattedData);
+    })
     fetch(`${API_BASE_URL}/user-weights`, { credentials: 'include' })
     .then(res => res.json())
     .then(data => {
@@ -276,6 +288,23 @@ export default function CellAnnotationTool() {
     }
 
     setIsCropping(false)
+  }
+
+  // Handler for clicking a specific image
+  const handleLoadImage = (image) => {
+    console.log("Selected Image ID:", image.id)
+    setImageURL(image.url)
+    setImageID(image.id)
+    // TODO: Handle annotations
+
+    if (galleryMenuOpen) {
+      setGalleryMenuOpen(false)
+    }
+  }
+
+  // Handler for the footer button
+  const handleDeleteImage = () => {
+    alert("Parent function triggered from Modal footer!")
   }
 
   // const handleBrightnessChange = (event, newValue) => {
@@ -1060,6 +1089,14 @@ export default function CellAnnotationTool() {
   // Calibrator
   const [calibratorOpen, setCalibratorOpen] = useState(false)
 
+  const [galleryMenuOpen, setGalleryMenuOpen] = useState(false)
+  // const [images] = useState([
+  //   { url: 'https://picsum.photos/200/300?random=1', id: 1 },
+  //   { url: 'https://picsum.photos/200/300?random=2', id: 2 },
+  //   { url: 'https://picsum.photos/200/300?random=3', id: 3 },
+  //   { url: 'https://picsum.photos/200/300?random=4', id: 4 },
+  // ]);
+
   const modal_style = {
     position: 'absolute',
     top: '50%',
@@ -1621,9 +1658,16 @@ export default function CellAnnotationTool() {
           Upload Image
           <input hidden type='file' accept='image/tiff' onChange={handleUpload}/>
         </Button>
-        <Button variant='contained' component='label' onClick={handleSave} sx={{...button_style_span}}>
+        <Button variant='contained' component='label' onClick={() => setGalleryMenuOpen(true)} sx={{...button_style_span}}>
           Open Image
         </Button>
+        <GalleryMenu 
+          open={galleryMenuOpen}
+          handleClose={() => setGalleryMenuOpen(false)}
+          images={imageList}
+          onImageClick={handleLoadImage}
+          onFooterButtonClick={handleDeleteImage}
+        />
         <Button variant='contained' component='label' onClick={handleSave} sx={{...button_style_span}}>
           Save Image
         </Button>
