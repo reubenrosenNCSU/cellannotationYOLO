@@ -41,8 +41,10 @@ export default function CellAnnotationTool() {
   const [cMax, setCMax] = useState(100)
 
   // State for annotations
+  const [annotations_old, setAnnotations_old] = useState([])
   const [annotations, setAnnotations] = useState([])
   const [classes, setClasses] = useState([])
+  const [colors, setColors] = useState([])
   const [currentClass, setCurrentClass] = useState(0)
   const [classes_old, setClasses_old] = useState([
     { name: 'Neuron', color: '#60A5FA' },  // index 0 = MADM class 0
@@ -88,13 +90,13 @@ export default function CellAnnotationTool() {
   const [savedAnnotationCount, setSavedAnnotationCount] = useState(0)
 
   useEffect(() => {
-    if (annotations.length > 0) {
+    if (annotations_old.length > 0) {
       detectCellDiameter()
     }
 
     console.log(annotations)
-    console.log(currentModel_old)
-  }, [annotations])
+    console.log(currentModel)
+  }, [annotations, annotations_old])
 
   useEffect(() => {
     fetch(`${API_BASE_URL}/user-images`, { credentials: 'include' })
@@ -114,8 +116,9 @@ export default function CellAnnotationTool() {
     .then(data => {
       setModels(data)
       setCurrentModel(0)
-      console.log(data[0].label_set.labels)
-      setClasses(data[0].label_set.labels)
+      console.log(data)
+      const allLabels = data.map(item => item.label_set.labels)
+      setClasses(allLabels)
       setCurrentClass(0)
     })
   }, []);
@@ -176,7 +179,7 @@ export default function CellAnnotationTool() {
         setImageID(data.image_id)
         setImageURL(`${API_BASE_URL}${data.converted_url}`)
         setImageSize({width: data.dimensions[0], height: data.dimensions[1]})
-        setAnnotations([])
+        setAnnotations_old([])
     } catch(e) {
       alert('Upload failed: ' + (e.response?.data?.error || e.message))
     } finally {
@@ -228,7 +231,7 @@ export default function CellAnnotationTool() {
 
       ctx.lineWidth = 2
 
-      annotations.forEach((a) => {
+      annotations_old.forEach((a) => {
         ctx.strokeStyle = classes_old[a.class].color
         ctx.strokeRect(a.x, a.y, a.w, a.h)
       })
@@ -266,7 +269,7 @@ export default function CellAnnotationTool() {
         if (!res.ok) throw new Error('Crop failed')
         const data = await res.json()
 
-        setAnnotations((prevAnnotations) => {
+        setAnnotations_old((prevAnnotations) => {
           return prevAnnotations.filter((anno) => {
             // A box is "inside" if its boundaries are within the crop box boundaries
             const isInside =
@@ -324,14 +327,25 @@ export default function CellAnnotationTool() {
     //   box.class = currentClass
     // }
     if (imageURL) {
-      setAnnotations(prev => [...prev, box])
+      setAnnotations(prev => {
+        const tempAnnotations = [...prev]
+        const currentGroup = tempAnnotations[currentModel] || []
+        tempAnnotations[currentModel] = [...currentGroup, box]
+        return tempAnnotations
+      })
       setUndoStack(prev => [...prev, box])
       //detectCellDiameter()
     }
   }
 
   const handleRemoveBox = (box) => {
-    setAnnotations(prev => prev.filter(b => b !== box))
+    setAnnotations(prev => {
+        const tempAnnotations = [...prev]
+        tempAnnotations[currentModel] = tempAnnotations[currentModel].filter(
+          b => b !== box
+        )
+        return tempAnnotations
+      })
     setUndoStack(prev => prev.slice(0, -1))
     //detectCellDiameter()
   }
@@ -349,14 +363,14 @@ export default function CellAnnotationTool() {
     const confirm = window.confirm('Are you sure you want to delete all annotations? This cannot be undone!')
       if (!confirm) return
     
-    setAnnotations([])
+    setAnnotations_old([])
   }
 
   async function exportAnnotations() {
     const filename = imageName
     const imageWidth = imageSize.width
     const imageHeight = imageSize.height
-    const yoloData = annotations.map(ann => {
+    const yoloData = annotations_old.map(ann => {
       // Convert to normalized center coordinates
       const centerX = (ann.x + ann.w / 2) / imageWidth
       const centerY = (ann.y + ann.h / 2) / imageHeight
@@ -418,7 +432,7 @@ export default function CellAnnotationTool() {
       const yoloData = e.target.result
       const lines = yoloData.split('\n')
 
-      setAnnotations([])
+      setAnnotations_old([])
       let importedCount = 0
       const imageWidth = imageSize.width
       const imageHeight = imageSize.height
@@ -458,12 +472,12 @@ export default function CellAnnotationTool() {
     // }
 
     let total = 0
-    annotations.forEach(ann => {
+    annotations_old.forEach(ann => {
       total += (ann.w + ann.h) / 2
     })
 
-    const avgDiameter = Math.round(total / annotations.length)
-    console.log(annotations.length)
+    const avgDiameter = Math.round(total / annotations_old.length)
+    console.log(annotations_old.length)
     setDetectedDiameter(avgDiameter)
   }
 
@@ -524,7 +538,7 @@ export default function CellAnnotationTool() {
       const imgWidth = data.image_width
       const imgHeight = data.image_height
 
-      setAnnotations([])
+      setAnnotations_old([])
       let importedCount = 0
 
       yoloTxt.split('\n').forEach(line => {
@@ -658,7 +672,7 @@ export default function CellAnnotationTool() {
           body: formData,
           credentials: 'include',
         })
-
+        console.log(res)
         if (!res.ok) throw new Error('Model upload failed')
         const data = await res.json()
         console.log(data)
@@ -702,7 +716,7 @@ export default function CellAnnotationTool() {
       const imgWidth = data.image_width
       const imgHeight = data.image_height
 
-      setAnnotations([])
+      setAnnotations_old([])
       let importedCount = 0
 
       yoloTxt.split('\n').forEach(line => {
@@ -735,7 +749,7 @@ export default function CellAnnotationTool() {
   async function saveTrainingData() {
     // Normalize annotations
     console.log(imageSize)
-    const normalizedAnnotations = annotations.map(ann => {
+    const normalizedAnnotations = annotations_old.map(ann => {
       const x_center = parseFloat(((ann.x + ann.w / 2) / imageSize.width).toFixed(6));
       const y_center = parseFloat(((ann.y + ann.h / 2) / imageSize.height).toFixed(6));
       const width_norm = parseFloat((ann.w / imageSize.width).toFixed(6));
@@ -774,7 +788,7 @@ export default function CellAnnotationTool() {
       }
       const data = await res.json()
       console.log('Success from Server:', data)
-      setSavedAnnotationCount(savedAnnotationCount + annotations.length)
+      setSavedAnnotationCount(savedAnnotationCount + annotations_old.length)
       const newEntry = {
         imageName: data.image_file,
         annotationName: data.annotation_file,
@@ -945,7 +959,7 @@ export default function CellAnnotationTool() {
           // 4. Update states
           setImageName(item.imageName)
           setImageURL(`${API_BASE_URL}${imageLink}`)
-          setAnnotations(parsedAnnotations)
+          setAnnotations_old(parsedAnnotations)
           
       } catch (error) {
           console.error("Load failed:", error)
@@ -1130,17 +1144,17 @@ export default function CellAnnotationTool() {
                 <Button variant='contained' {...bindTrigger(popupState)} 
                   endIcon={<KeyboardArrowDownIcon />} 
                   sx={{...button_style_span, mt: 1}}
-                  disabled={classes.length === 0}
+                  disabled={!classes[currentModel] || classes[currentModel].length === 0}
                 >
-                  {classes.length > 0 ? classes[currentClass] : "No Classes Available"}
+                  {classes[currentModel]?.length > 0 ? classes[currentModel][currentClass]?.name : "No Classes Available"}
                 </Button>
                 <Menu {...bindMenu(popupState)}>
-                  {classes.map((item, index) => (
+                  {classes[currentModel]?.map((item, index) => (
                     <MenuItem 
                       key={index}
-                      onClick={() => {currentClass(index)}}
+                      onClick={() => {setCurrentClass(index)}}
                     >
-                        <Typography variant='body1'>{item}</Typography>
+                        <Typography variant='body1'>{item.name}</Typography>
                     </MenuItem>
                   ))}
                 </Menu>
@@ -1205,7 +1219,7 @@ export default function CellAnnotationTool() {
               <Typography variant='body2'>Show labels</Typography>
             </Box>
             <Typography gutterBottom variant='body2' sx={{ fontWeight: 'bold' }}>
-              Current Cells: {annotations.length}
+              Current Cells: {annotations_old.length}
             </Typography>
           </Box>
           <Box sx={{pt: 1, borderTop: 1, borderColor: 'grey.500'}}>
@@ -1709,7 +1723,7 @@ export default function CellAnnotationTool() {
               </Button>
               <Menu {...bindMenu(popupState)}>
                 {models.map((item, index) => (
-                  <MenuItem key={index} onClick={() => {setCurrentModel(index); setClasses(models[index].label_set.labels)}}>
+                  <MenuItem key={index} onClick={() => {setCurrentModel(index); setCurrentClass(0)}}>
                     <Typography variant='body1'>{item.name}</Typography>
                   </MenuItem>
                 ))}
@@ -1739,9 +1753,9 @@ export default function CellAnnotationTool() {
         <Box sx={{ flexGrow: 1, display: 'flex', justifyContent: 'center', bgcolor: '#111' }}>
           <ImageCanvas src={imageURL} boxes={annotations} onAddBox={handleAddBox}
             onRemoveBox={handleRemoveBox} isCropping={isCropping} onCrop={handleCrop}
-            currentClass={currentClass_old} classes={classes_old} imageSize={imageSize}
+            currentClass={currentClass} classes={classes} imageSize={imageSize}
             brightness={brightness} contrast={contrast}
-            scale={scale} onScaleChange={setScale} showLabels={showLabels}/>
+            scale={scale} onScaleChange={setScale} showLabels={showLabels} currentSet={currentModel}/>
         </Box>
       </Box>
       {calibratorOpen && (

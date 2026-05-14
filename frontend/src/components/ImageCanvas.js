@@ -6,7 +6,7 @@ const LARGE_IMAGE_THRESHOLD = 16000
 const MAX_VISIBLE_TILES = 36
 
 export default function ImageCanvas({ src, boxes, onAddBox, onRemoveBox, isCropping,
-    onCrop, currentClass, classes, imageSize, brightness, contrast, scale, onScaleChange, showLabels = true }) {
+    onCrop, currentClass, classes, imageSize, brightness, contrast, scale, onScaleChange, showLabels = true, currentSet }) {
   const canvasRef = useRef(null)
   const imgRef = useRef(null)
   const tilesRef = useRef({})
@@ -173,31 +173,32 @@ export default function ImageCanvas({ src, boxes, onAddBox, onRemoveBox, isCropp
 
     const fontSize = 11 / scale
     ctx.font = `${fontSize}px sans-serif`
+    boxes.forEach((set, index) => {
+      set.forEach((b) => {
+        const color = classes[index][b.class].color
+        ctx.strokeStyle = color
+        ctx.strokeRect(b.x, b.y, b.w, b.h)
 
-    boxes.forEach((b) => {
-      const color = classes[b.class].color
-      ctx.strokeStyle = color
-      ctx.strokeRect(b.x, b.y, b.w, b.h)
+        if (showLabels) {
+          const label = b.confidence != null
+            ? `${classes[index][b.class].name} ${(b.confidence * 100).toFixed(0)}%`
+            : classes[index][b.class].name
+          const padding = 2 / scale
+          const textWidth = ctx.measureText(label).width
+          const labelH = fontSize + padding * 2
+          const labelY = b.y - labelH > 0 ? b.y - labelH : b.y
 
-      if (showLabels) {
-        const label = b.confidence != null
-          ? `${classes[b.class].name} ${(b.confidence * 100).toFixed(0)}%`
-          : classes[b.class].name
-        const padding = 2 / scale
-        const textWidth = ctx.measureText(label).width
-        const labelH = fontSize + padding * 2
-        const labelY = b.y - labelH > 0 ? b.y - labelH : b.y
-
-        ctx.fillStyle = color
-        ctx.fillRect(b.x, labelY, textWidth + padding * 2, labelH)
-        ctx.fillStyle = getLabelTextColor(color)
-        ctx.fillText(label, b.x + padding, labelY + fontSize)
-      }
+          ctx.fillStyle = color
+          ctx.fillRect(b.x, labelY, textWidth + padding * 2, labelH)
+          ctx.fillStyle = getLabelTextColor(color)
+          ctx.fillText(label, b.x + padding, labelY + fontSize)
+        }
+      })
     })
 
     // draw box while dragging
     if (currentBox) {
-      ctx.strokeStyle = classes[currentClass].color
+      ctx.strokeStyle = classes[currentSet][currentClass].color
       ctx.strokeRect(currentBox.x, currentBox.y, currentBox.w, currentBox.h)
     }
 

@@ -34,7 +34,6 @@ from sqlalchemy import or_
 # Disable decompression bomb protection for large TIFF files
 Image.MAX_IMAGE_PIXELS = None
 
-
 data_folder = os.path.join(os.getcwd(), 'data')
 app = Flask(__name__, static_folder=data_folder, static_url_path='/static')
 CORS(app, supports_credentials=True)  # This will allow all domains to access your API
@@ -45,7 +44,7 @@ app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///biolab.db'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(hours=24)  # Session expires after 24 hours
 
-from database import db, seed_database
+from database import db
 from models import User, ImageRecord, Annotation, LabelSet, Weights
 
 db.init_app(app)
@@ -64,11 +63,8 @@ def ensure_user_session():
         try:
             new_user = User(id=user_id)
             db.session.add(new_user)
-            db.session.commit()
-            
-            # --- THE FOLDER SETUP ---
-            # Now that the user is in the DB, build their "home"
             new_user.setup_filesystem()
+            db.session.commit()
             
         except Exception as e:
             db.session.rollback()
@@ -332,6 +328,7 @@ def upload_file():
         db.session.rollback()
         return jsonify({'error': str(e)}), 500
 
+import random
 
 @app.route('/upload-custom-model', methods=['POST'])
 def upload_custom_model():
@@ -354,34 +351,45 @@ def upload_custom_model():
         file_ext = os.path.splitext(model_file.filename)[1]
         model_filename = f'{unique_id}{file_ext}'
         full_path = os.path.join('data', model_dir, model_filename)
-
         model_file.save(full_path)
 
         target_label_set_id = None
 
         if model_type == 'MADM':
-            target_label_set_id = 'ls_madm'
+            target_model = Weights.query.filter_by(is_default=True, name='MADM').first()
+            if target_model:
+                target_label_set_id = target_model.label_set_id
+            else:
+                return jsonify({'error': f"MADM class labels not found"}), 500
         elif model_type == 'SGN':
-            target_label_set_id = 'ls_sgn'
+            target_model = Weights.query.filter_by(is_default=True, name='SGN').first()
+            if target_model:
+                target_label_set_id = target_model.label_set_id
+            else:
+                return jsonify({'error': f"SGN class labels not found"}), 500
         else:
             try:
                 # Get class names from custom model
                 temp_model = YOLO(full_path)
-                class_list = list(temp_model.names.values())
-
+                class_names = list(temp_model.names.values())
+                formatted_labels = []
+                for name in class_names:
+                    random_color = f"#{random.randint(0, 0xFFFFFF):06x}"
+                    formatted_labels.append({
+                        "name": name,
+                        "color": random_color
+                    })
                 # Create new label set for the model
-                new_ls_id = f"ls_{unique_id}"
+                new_ls_id = str(uuid.uuid4())
                 new_ls = LabelSet(
                     id=new_ls_id,
-                    name=f"Labels for {model_name}",
                     user_id=user_id,
-                    labels=class_list
+                    labels=formatted_labels
                 )
                 db.session.add(new_ls)
                 target_label_set_id = new_ls_id
             except Exception as e:
                 return jsonify({'error': f"Could not parse YOLO classes: {str(e)}"}), 400
-
         new_weights = Weights(
             id=unique_id,
             user_id=user_id,
@@ -393,7 +401,7 @@ def upload_custom_model():
         db.session.add(new_weights)
         db.session.commit()
 
-        label_set = db.session.get(LabelSet, target_label_set_id)
+        # label_set = db.session.get(LabelSet, target_label_set_id)
 
         return jsonify({
             'message': 'Model uploaded successfully',
@@ -402,6 +410,7 @@ def upload_custom_model():
 
     except Exception as e:
         db.session.rollback()
+        os.remove(full_path)
         print(f"Error uploading model: {str(e)}")
         return jsonify({'error': str(e)}), 500
 
@@ -1639,6 +1648,6 @@ if __name__ == '__main__':
     print('starting application')
     with app.app_context():
         db.create_all()
-        seed_database(app)
+        #seed_database(app)
         print("Database initialized")
     app.run(host='0.0.0.0', port=5002, debug=True)
