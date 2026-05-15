@@ -418,9 +418,57 @@ def upload_custom_model():
 @app.route('/save-annotations', methods=['POST']) #TODO: Finish this!!!
 def save_annotations():
     user_id = session['user_id']
-    user = db.session.get(User, user_id)
-    image_id = request.form['image_id']
-    image_record = db.session.get(ImageRecord, image_id)
+    if not user_id:
+        return jsonify({'error': 'Unauthorized'}), 401
+    paths = []
+    try:
+        user = db.session.get(User, user_id)
+        data = request.get_json()
+        image_id = data['image_id']
+        weights = data['model']
+        annotations = data['annotations']
+        annotation_dir = user.get_path('annotations')
+
+        unique_id = str(uuid.uuid4())
+        annotation_filename = f'{unique_id}.txt'
+        full_path = os.path.join('data', annotation_dir, annotation_filename)
+        paths.append(full_path)
+        new_annotation = Annotation(
+            id=unique_id,
+            user_id=user_id,
+            file_path=full_path,
+            image_id=image_id,
+            weights_id=weights['id'],
+            annotations=annotations,
+            count=len(annotations)
+        )
+        db.session.add(new_annotation)
+        yolo_lines = []
+        for ann in annotations:
+            line = "{0} {1:.6f} {2:.6f} {3:.6f} {4:.6f}".format(
+                ann['class'],
+                ann['x'],
+                ann['y'],
+                ann['w'],
+                ann['h']
+            )
+            yolo_lines.append(line)
+            
+        # Save annotation file
+        with open(full_path, 'w') as f:
+            f.write("\n".join(yolo_lines))
+
+        db.session.commit()
+        return jsonify({'message': 'Success'}), 200
+
+    except Exception as e:
+        db.session.rollback()
+        for path in paths:
+            if os.path.exists(path):
+                os.remove(path)
+        print(f"Error saving annotations: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
 
 
 # *----------* Data Download Endpoints *----------* #

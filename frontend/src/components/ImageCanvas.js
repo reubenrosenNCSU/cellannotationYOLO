@@ -321,6 +321,7 @@ export default function ImageCanvas({ src, boxes, onAddBox, onRemoveBox, isCropp
         setCurrentBox(null)
         return
       }
+      currentBox.isDetected = false
       onAddBox(currentBox)
       setCurrentBox(null)
     }

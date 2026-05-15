@@ -116,6 +116,7 @@ export default function CellAnnotationTool() {
     .then(data => {
       setModels(data)
       setCurrentModel(0)
+      setAnnotations(Array.from({ length: data.length }, () => []))
       console.log(data)
       const allLabels = data.map(item => item.label_set.labels)
       setClasses(allLabels)
@@ -179,7 +180,7 @@ export default function CellAnnotationTool() {
         setImageID(data.image_id)
         setImageURL(`${API_BASE_URL}${data.converted_url}`)
         setImageSize({width: data.dimensions[0], height: data.dimensions[1]})
-        setAnnotations_old([])
+        setAnnotations([])
     } catch(e) {
       alert('Upload failed: ' + (e.response?.data?.error || e.message))
     } finally {
@@ -364,6 +365,38 @@ export default function CellAnnotationTool() {
       if (!confirm) return
     
     setAnnotations_old([])
+  }
+
+  async function saveAnnotations() {
+    const formData = new FormData()
+
+    setIsLoading(true)
+    try {
+      for (const [i, list] of annotations.entries()) {
+        if (!list || list.length < 1) continue;
+
+        const res = await fetch(`${API_BASE_URL}/save-annotations`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            image_id: imageID,
+            annotations: list,
+            model: models[i],
+          }),
+          credentials: 'include',
+        });
+
+        if (!res.ok) throw new Error(`Save failed for model at index ${i}`);
+        
+        console.log(`Saved index ${i} successfully`);
+      }
+      alert("All annotations saved!");
+      //const data = await res.json()
+    } catch(e) {
+      alert('Save failed: ' + (e.response?.data?.error || e.message))
+    } finally {
+      setIsLoading(false)
+    }
   }
 
   async function exportAnnotations() {
@@ -1188,6 +1221,9 @@ export default function CellAnnotationTool() {
             <Typography gutterBottom variant='body1' sx={{ fontWeight: 'bold' }}>
               Manage Annotations
             </Typography>
+            <Button variant='contained' component='label' onClick={saveAnnotations} sx={{...button_style_span}}>
+              Save Annotations
+            </Button>
             <Button variant='contained' component='label' onClick={exportAnnotations} sx={{...button_style_span}}>
               Export Annotations
             </Button>

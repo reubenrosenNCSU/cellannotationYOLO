@@ -98,7 +98,6 @@ class ImageRecord(db.Model):
 class Annotation(db.Model):
     id = db.Column(db.String(36), primary_key=True)
     user_id = db.Column(db.String(36), db.ForeignKey('user.id'), nullable=False)
-    original_filename = db.Column(db.String(255))
 
     file_path = db.Column(db.String(512))
     created_at = db.Column(db.DateTime, default=datetime.datetime.utcnow)
@@ -106,6 +105,7 @@ class Annotation(db.Model):
     image_id = db.Column(db.String(36), db.ForeignKey('image_record.id'))
     weights_id = db.Column(db.String(36), db.ForeignKey('weights.id'), nullable=False)
     
+    annotations = db.Column(db.JSON, nullable=False)
     count = db.Column(db.Integer, default=0)
 
 
