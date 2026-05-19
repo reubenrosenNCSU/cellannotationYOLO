@@ -5,6 +5,12 @@ import uuid
 
 class User(db.Model):
     id = db.Column(db.String(36), primary_key=True)
+    username = db.Column(db.String, unique=True, nullable=True)
+
+    images = db.relationship('ImageRecord', cascade='all, delete-orphan', backref='user')
+    annotations = db.relationship('Annotation', cascade='all, delete-orphan', backref='user')
+    label_sets = db.relationship('LabelSet', cascade='all, delete-orphan', backref='user')
+    weights = db.relationship('Weights', cascade='all, delete-orphan', backref='user')
     
     def setup_filesystem(self):
         '''Creates the persistent directory structure for a new user.'''

@@ -31,8 +31,10 @@ export default function SideMenu({ children, anchorSide = "left" }) {
                     "& .MuiDrawer-paper": {
                         width: drawerWidth,
                         boxSizing: "border-box",
-                        // We remove padding here so it doesn't affect the scrollbar track
+                        // Remove padding so it doesn't affect the scrollbar track
                         p: 0, 
+                        top: '64px', 
+                        height: 'calc(100vh - 64px)',
                         transform: open ? "none" : `translateX(${isLeft ? '-100%' : '100%'})`,
                         transition: (theme) => theme.transitions.create("transform", {
                             easing: theme.transitions.easing.sharp,

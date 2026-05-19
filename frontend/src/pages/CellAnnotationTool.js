@@ -9,6 +9,7 @@ import TextField from '@mui/material/TextField'
 import DownloadIcon from '@mui/icons-material/Download'
 import Tooltip from '@mui/material/Tooltip'
 import CircularProgress from '@mui/material/CircularProgress'
+import AppBar from '@mui/material/AppBar'
 
 import SideMenu from '../components/SideMenu'
 import ImageCanvas from '../components/ImageCanvas'
@@ -24,6 +25,12 @@ export default function CellAnnotationTool() {
   const API_BASE_URL = 'http://10.80.24.12:5002'
 
   const [isLoading, setIsLoading] = useState(false)
+
+  // User state
+  const [user, setUser] = useState(null)
+  const [username, setUsername] = useState('')
+  const [isLoggedIn, setIsLoggedIn] = useState(false)
+  const [isAuthReady, setIsAuthReady] = useState(false)
 
   // State for image operations
   const [imageList, setImageList] = useState([])
@@ -90,6 +97,30 @@ export default function CellAnnotationTool() {
   const [savedAnnotationCount, setSavedAnnotationCount] = useState(0)
 
   useEffect(() => {
+    async function initializeSession() {
+      try {
+        const res = await fetch(`${API_BASE_URL}/me`, {
+          method: 'GET',
+          credentials: 'include',
+        })
+        const data = await res.json();
+        if (res.ok) {
+          setUser(data.user)
+          console.log(data)
+        }
+      } catch (err) {
+        console.error("Session initialization failed", err)
+      } finally {
+        // Unlock the rest of the application
+        setIsAuthReady(true);
+      }
+    }
+    initializeSession()
+  }, [])
+
+  useEffect(() => {
+    if (!isAuthReady) return
+
     if (annotations_old.length > 0) {
       detectCellDiameter()
     }
@@ -99,6 +130,8 @@ export default function CellAnnotationTool() {
   }, [annotations, annotations_old])
 
   useEffect(() => {
+    if (!isAuthReady) return
+
     fetch(`${API_BASE_URL}/user-images`, { credentials: 'include' })
     .then(res => res.json())
     .then(data => {
@@ -125,6 +158,8 @@ export default function CellAnnotationTool() {
   }, []);
 
   useEffect(() => {
+    if (!isAuthReady) return
+
     fetch(`${API_BASE_URL}/get-all-training-data`, { credentials: 'include' })
       .then(res => res.json())
       .then(data => {
@@ -136,17 +171,74 @@ export default function CellAnnotationTool() {
 
   useEffect(() => {
     const handleKeyDown = (e) => {
-    const isZ = e.key.toLowerCase() === 'z'
-    const isModifierPressed = e.ctrlKey || e.metaKey
+      const isZ = e.key.toLowerCase() === 'z'
+      const isModifierPressed = e.ctrlKey || e.metaKey
 
-    if (isZ && isModifierPressed && undoStack.length > 0) {
-      handleRemoveBox(undoStack[undoStack.length - 1])
+      if (isZ && isModifierPressed && undoStack.length > 0) {
+        handleRemoveBox(undoStack[undoStack.length - 1])
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  })
+
+  // *----------* User Operations *----------* \\
+
+  async function handleRegister() {
+    if (!username || username.trim() === '') return
+    
+    try {
+      const res = await fetch(`${API_BASE_URL}/register`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ username: username.trim() }),
+        credentials: 'include', // Keeps the current temporary session cookie
+      })
+
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'Registration failed')
+
+      console.log(data.message)
+      // Optional: Set your user state here if you track it
+      // setCurrentUser(username) 
+      
+    } catch (err) {
+      console.error('Registration failed:', err.message)
+      // Optional: Set an error state to display to the user
     }
   }
 
-  window.addEventListener('keydown', handleKeyDown)
-  return () => window.removeEventListener('keydown', handleKeyDown)
-  })
+  async function handleLogin() {
+    if (!username || username.trim() === '') return
+
+    try {
+      const res = await fetch(`${API_BASE_URL}/login`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ username: username.trim() }),
+        credentials: 'include', // Updates the browser cookie to the existing user's UUID
+      })
+
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'Login failed')
+
+      console.log(data.message)
+      
+      // CRITICAL: Since the session switched to an existing user, 
+      // you will want to trigger a refresh of the current file list/batch 
+      // so the UI shows their old saved files instead of the temporary ones.
+      // fetchUserFiles() 
+      
+    } catch (err) {
+      console.error('Login failed:', err.message)
+    }
+  }
+
   
   // *----------* Image Operations *----------* \\
 
@@ -1684,7 +1776,7 @@ export default function CellAnnotationTool() {
   ]
 
   return (
-    <Box sx={{ display: 'flex', height: '100vh', width: '100vw' }}>
+    <Box sx={{ display: 'flex', flexDirection: 'column', height: '100vh', width: '100vw', overflow: 'hidden' }}>
       {isLoading && (
         <div style={{
           position: 'fixed',
@@ -1700,106 +1792,133 @@ export default function CellAnnotationTool() {
           <p style={{ color: 'white', marginTop: 12, fontSize: 14 }}>Processing...</p>
         </div>
       )}
-      <SideMenu anchorSide='left'>
-        <Typography gutterBottom variant='h6' fontWeight={'bold'}>
-            Cell Annotation Tool (CAT🐱)
-        </Typography>
-        <Button variant='contained' component='label' sx={{...button_style_span}}>
-          Upload Image
-          <input hidden type='file' accept='image/tiff' onChange={handleUpload}/>
-        </Button>
-        <Button variant='contained' component='label' onClick={() => setGalleryMenuOpen(true)} sx={{...button_style_span}}>
-          Open Image
-        </Button>
-        <GalleryMenu 
-          open={galleryMenuOpen}
-          handleClose={() => setGalleryMenuOpen(false)}
-          images={imageList}
-          onImageClick={handleLoadImage}
-          onFooterButtonClick={handleDeleteImage}
-        />
-        <Button variant='contained' component='label' onClick={handleSave} sx={{...button_style_span}}>
-          Save Image
-        </Button>
-        <Button variant='contained' component='label' onClick={toggleCrop}  sx={{...button_style_span, bgcolor: isCropping ? 'primary.dark' : 'containedPrimary',}}>
-          Crop Image
-        </Button>
-
-        <Stack spacing={2} sx={{ width: '100%' }}>
-          <AdjustableSlider
-            label='Brightness'
-            value={brightness}
-            onChange={(e, val) => setBrightness(val)}
-            min={bMin}
-            setMin={setBMin}
-            max={bMax}
-            setMax={setBMax}
-          />
-          <AdjustableSlider
-            label='Contrast'
-            value={contrast}
-            onChange={(e, val) => setContrast(val)}
-            min={cMin}
-            setMin={setCMin}
-            max={cMax}
-            setMax={setCMax}
-          />
-        </Stack>
-        <PopupState variant='popover' popupId='model-popup-menu'>
-          {(popupState) => (
-            <Fragment>
-              <Button 
-                variant='contained' 
-                {...bindTrigger(popupState)} 
-                disabled={models.length === 0} // Disable if no models yet
-                endIcon={<KeyboardArrowDownIcon />} 
-                sx={{ ...button_style_span, mt: 1 }}
-              >
-                {models.length > 0 ? models[currentModel].name : "No Models Available"}
-              </Button>
-              <Menu {...bindMenu(popupState)}>
-                {models.map((item, index) => (
-                  <MenuItem key={index} onClick={() => {setCurrentModel(index); setCurrentClass(0)}}>
-                    <Typography variant='body1'>{item.name}</Typography>
-                  </MenuItem>
-                ))}
-              </Menu>
-            </Fragment>
-          )}
-        </PopupState>
-        
-        <TabMenu items={tabs}></TabMenu>
-      </SideMenu>
-
-      <Box sx={{ flexGrow: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-        <Box sx={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          bgcolor: '#1e1e1e',
-          borderBottom: '1px solid #333',
+      <AppBar
+        position="fixed" 
+        sx={{ 
+          height: '64px', 
+          display: 'flex', 
+          flexDirection: 'row', 
+          alignItems: 'center', 
+          gap: 2, 
           px: 2,
-          py: 0.75,
-          minHeight: 36,
-        }}>
-          <Typography variant='body2' sx={{ color: '#ccc', fontFamily: 'monospace' }}>
-            {imageName || 'No image loaded'}
+          zIndex: (theme) => theme.zIndex.drawer + 1 
+        }}
+      >
+        <TextField
+          label="Username"
+          variant="outlined"
+          value={username}
+          onChange={(e) => setUsername(e.target.value)}
+        />
+        <Button variant='contained' component='label' onClick={handleLogin}>
+          Login
+        </Button>
+        <Button variant='contained' component='label' onClick={handleRegister}>
+          Register
+        </Button>
+      </AppBar>
+      <Box>
+        <SideMenu anchorSide='left'>
+          <Typography gutterBottom variant='h6' fontWeight={'bold'}>
+              Cell Annotation Tool (CAT🐱)
           </Typography>
+          <Button variant='contained' component='label' sx={{...button_style_span}}>
+            Upload Image
+            <input hidden type='file' accept='image/tiff' onChange={handleUpload}/>
+          </Button>
+          <Button variant='contained' component='label' onClick={() => setGalleryMenuOpen(true)} sx={{...button_style_span}}>
+            Open Image
+          </Button>
+          <GalleryMenu 
+            open={galleryMenuOpen}
+            handleClose={() => setGalleryMenuOpen(false)}
+            images={imageList}
+            onImageClick={handleLoadImage}
+            onFooterButtonClick={handleDeleteImage}
+          />
+          <Button variant='contained' component='label' onClick={handleSave} sx={{...button_style_span}}>
+            Save Image
+          </Button>
+          <Button variant='contained' component='label' onClick={toggleCrop}  sx={{...button_style_span, bgcolor: isCropping ? 'primary.dark' : 'containedPrimary',}}>
+            Crop Image
+          </Button>
+
+          <Stack spacing={2} sx={{ width: '100%' }}>
+            <AdjustableSlider
+              label='Brightness'
+              value={brightness}
+              onChange={(e, val) => setBrightness(val)}
+              min={bMin}
+              setMin={setBMin}
+              max={bMax}
+              setMax={setBMax}
+            />
+            <AdjustableSlider
+              label='Contrast'
+              value={contrast}
+              onChange={(e, val) => setContrast(val)}
+              min={cMin}
+              setMin={setCMin}
+              max={cMax}
+              setMax={setCMax}
+            />
+          </Stack>
+          <PopupState variant='popover' popupId='model-popup-menu'>
+            {(popupState) => (
+              <Fragment>
+                <Button 
+                  variant='contained' 
+                  {...bindTrigger(popupState)} 
+                  disabled={models.length === 0} // Disable if no models yet
+                  endIcon={<KeyboardArrowDownIcon />} 
+                  sx={{ ...button_style_span, mt: 1 }}
+                >
+                  {models.length > 0 ? models[currentModel].name : "No Models Available"}
+                </Button>
+                <Menu {...bindMenu(popupState)}>
+                  {models.map((item, index) => (
+                    <MenuItem key={index} onClick={() => {setCurrentModel(index); setCurrentClass(0)}}>
+                      <Typography variant='body1'>{item.name}</Typography>
+                    </MenuItem>
+                  ))}
+                </Menu>
+              </Fragment>
+            )}
+          </PopupState>
+          
+          <TabMenu items={tabs}></TabMenu>
+        </SideMenu>
+
+        <Box sx={{ flexGrow: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+          <Box sx={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            bgcolor: '#1e1e1e',
+            borderBottom: '1px solid #333',
+            px: 2,
+            py: 0.75,
+            minHeight: 36,
+          }}>
+            <Typography variant='body2' sx={{ color: '#ccc', fontFamily: 'monospace' }}>
+              {imageName || 'No image loaded'}
+            </Typography>
+          </Box>
+          <Box sx={{ flexGrow: 1, display: 'flex', justifyContent: 'center', bgcolor: '#111' }}>
+            <ImageCanvas src={imageURL} boxes={annotations} onAddBox={handleAddBox}
+              onRemoveBox={handleRemoveBox} isCropping={isCropping} onCrop={handleCrop}
+              currentClass={currentClass} classes={classes} imageSize={imageSize}
+              brightness={brightness} contrast={contrast}
+              scale={scale} onScaleChange={setScale} showLabels={showLabels} currentSet={currentModel}/>
+          </Box>
         </Box>
-        <Box sx={{ flexGrow: 1, display: 'flex', justifyContent: 'center', bgcolor: '#111' }}>
-          <ImageCanvas src={imageURL} boxes={annotations} onAddBox={handleAddBox}
-            onRemoveBox={handleRemoveBox} isCropping={isCropping} onCrop={handleCrop}
-            currentClass={currentClass} classes={classes} imageSize={imageSize}
-            brightness={brightness} contrast={contrast}
-            scale={scale} onScaleChange={setScale} showLabels={showLabels} currentSet={currentModel}/>
-        </Box>
+        {calibratorOpen && (
+          <CellCalibrator scale={scale} onClose={() => setCalibratorOpen(false)} />
+        )}
+        <SideMenu anchorSide={'right'}>
+          <TabMenu items={dataTabs}></TabMenu>
+        </SideMenu>
       </Box>
-      {calibratorOpen && (
-        <CellCalibrator scale={scale} onClose={() => setCalibratorOpen(false)} />
-      )}
-      <SideMenu anchorSide={'right'}>
-        <TabMenu items={dataTabs}></TabMenu>
-      </SideMenu>
     </Box>
   )
 }

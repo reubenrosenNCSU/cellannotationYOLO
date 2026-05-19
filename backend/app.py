@@ -1,5 +1,5 @@
 from werkzeug.utils import secure_filename  # ADD THIS AT TOP OF FILE
-from flask import Flask, request, jsonify, send_from_directory, send_file
+from flask import Flask, request, jsonify, send_from_directory, send_file, g
 import os
 from PIL import Image
 import uuid
@@ -51,24 +51,13 @@ db.init_app(app)
 
 @app.before_request
 def ensure_user_session():
-    # 1. Identity: Ensure the browser has a ID
-    if 'user_id' not in session:
-        session.permanent = True
-        session['user_id'] = str(uuid.uuid4())
+    if request.method == 'OPTIONS':
+        return
     
-    user_id = session['user_id']
-    user = db.session.get(User, user_id)
-    
-    if not user:
-        try:
-            new_user = User(id=user_id)
-            db.session.add(new_user)
-            new_user.setup_filesystem()
-            db.session.commit()
-            
-        except Exception as e:
-            db.session.rollback()
-            print(f"Error initializing user: {e}")
+    g.user = None
+    user_id = session.get('user_id')
+    if user_id:
+        g.user = db.session.get(User, user_id)
 
 
 def preprocess_image(image_path, upload_dir, detection_type, cell_diameter, p_low=None, p_high=None):
@@ -252,18 +241,129 @@ def clear_uploaded_images():
                 os.remove(file_path)
             except Exception as e:
                 print(f"Error deleting {file_path}: {e}")
+                
 
+# *----------* User Endpoints *----------* #
 
 @app.route("/api/hello")
 def hello():
     return jsonify({"message": "Hello from Flask API"})
 
+@app.route('/me', methods=['GET'])
+def get_current_user():
+    # If it's a completely new browser, establish the session cookie format
+    if 'user_id' not in session:
+        session.permanent = True
+        session['user_id'] = str(uuid.uuid4())
+    
+    user_id = session['user_id']
+    user = db.session.get(User, user_id)
+    
+    # If no user found, create new user
+    if not user:
+        try:
+            user = User(id=user_id)
+            db.session.add(user)
+            user.setup_filesystem()
+            db.session.commit()
+        except Exception as e:
+            db.session.rollback()
+            return jsonify({"error": f"Failed to initialize session: {e}"}), 500
+
+    return jsonify({
+        "logged_in": user.username is not None,
+        "user": {
+            "id": user.id,
+            "username": user.username
+        }
+    }), 200
+
+@app.route('/register', methods=['POST'])
+def register():
+    data = request.get_json()
+    username = data.get('username')
+    
+    if not username:
+        return jsonify({"error": "Username is required"}), 400
+        
+    # Check if the username already exists in the system
+    username_exists = User.query.filter_by(username=username).first()
+    if username_exists:
+        return jsonify({"error": "Username is already taken"}), 400
+        
+    # Get the temporary user record created by @app.before_request
+    current_user_id = session.get('user_id')
+    current_user = db.session.get(User, current_user_id)
+    
+    try:
+        if current_user:
+            if current_user.username:
+                return jsonify({"message": "Already logged in"}), 200
+            # Turn the temporary session into a permanent user account
+            current_user.username = username
+            db.session.commit()
+            session['user_id'] = current_user_id
+            session['username'] = username
+            session['logged_in'] = True
+            return jsonify({"message": "Registration successful! Session claimed."}), 201
+        else:
+            return jsonify({"error": "No active session found to register"}), 500
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/login', methods=['POST'])
+def login():
+    data = request.get_json()
+    username = data.get('username')
+    
+    if not username:
+        return jsonify({"error": "Username is required"}), 400
+        
+    # Look for the existing user
+    existing_user = User.query.filter_by(username=username).first()
+    if not existing_user:
+        return jsonify({"error": "User not found"}), 404
+        
+    # Get the temporary session ID that was just generated for this visit
+    current_user_id = session.get('user_id')
+    
+    # If they are somehow already logged in as this user, just return success
+    if existing_user.id == current_user_id:
+        return jsonify({"message": "Already logged in"}), 200
+        
+    # Discard and clean up the unneeded temporary session
+    current_user = db.session.get(User, current_user_id)
+    
+    # Safety check: Only delete it if it's truly an unowned temporary session
+    if current_user and current_user.username is None:
+        # Delete temporary folder
+        temp_user_path = os.path.join('data', current_user.get_path(''))
+        print(temp_user_path)
+        if os.path.exists(temp_user_path):
+            try:
+                shutil.rmtree(temp_user_path)
+            except Exception as e:
+                print(f"Error deleting temp folder {current_user_id}: {e}")
+                
+        # Delete temporary database row
+        db.session.delete(current_user)
+        db.session.commit()
+        
+    # Log user in by switching the session ID to their real account ID
+    session['user_id'] = existing_user.id
+    session['username'] = existing_user.username
+    session['logged_in'] = True
+    
+    return jsonify({"message": "Login successful. Switched to existing session."}), 200
+
 # *----------* Data Upload Endpoints *----------* #
 
 @app.route('/upload', methods=['POST'])
 def upload_file():
-    user_id = session['user_id']
-    user = db.session.get(User, user_id)
+    if not g.user:
+        return jsonify({"error": "No active session"}), 401
 
     if 'file' not in request.files:
         return jsonify({'error': 'No file part'}), 400
@@ -273,7 +373,7 @@ def upload_file():
         return jsonify({'error': 'No selected file'}), 400
 
     try:
-        image_dir = user.get_path('images')
+        image_dir = g.user.get_path('images')
 
         # 1. Save Original
         full_filename = file.filename
@@ -301,7 +401,7 @@ def upload_file():
         # 4. Create the Database Record
         new_image_record = ImageRecord(
             id=unique_id,
-            user_id=user.id,
+            user_id=g.user.id,
             original_filename=original_name,
             original_extension=ext,
             original_path=original_path,
@@ -332,11 +432,8 @@ import random
 
 @app.route('/upload-custom-model', methods=['POST'])
 def upload_custom_model():
-    user_id = session['user_id']
-    if not user_id:
-        return jsonify({'error': 'Unauthorized'}), 401
-
-    user = db.session.get(User, user_id)
+    if not g.user:
+        return jsonify({"error": "No active session"}), 401
 
     try:
         model_file = request.files.get('model')
@@ -346,7 +443,7 @@ def upload_custom_model():
         if not model_file or not model_name:
             return jsonify({'error': 'Missing model file or name'}), 400
         
-        model_dir = user.get_path('models')
+        model_dir = g.user.get_path('models')
         unique_id = str(uuid.uuid4())
         file_ext = os.path.splitext(model_file.filename)[1]
         model_filename = f'{unique_id}{file_ext}'
@@ -383,7 +480,7 @@ def upload_custom_model():
                 new_ls_id = str(uuid.uuid4())
                 new_ls = LabelSet(
                     id=new_ls_id,
-                    user_id=user_id,
+                    user_id=g.user.id,
                     labels=formatted_labels
                 )
                 db.session.add(new_ls)
@@ -392,7 +489,7 @@ def upload_custom_model():
                 return jsonify({'error': f"Could not parse YOLO classes: {str(e)}"}), 400
         new_weights = Weights(
             id=unique_id,
-            user_id=user_id,
+            user_id=g.user.id,
             name=model_name,
             file_path=full_path,
             label_set_id=target_label_set_id
@@ -417,17 +514,15 @@ def upload_custom_model():
 
 @app.route('/save-annotations', methods=['POST']) #TODO: Finish this!!!
 def save_annotations():
-    user_id = session['user_id']
-    if not user_id:
-        return jsonify({'error': 'Unauthorized'}), 401
+    if not g.user:
+        return jsonify({"error": "No active session"}), 401
     paths = []
     try:
-        user = db.session.get(User, user_id)
         data = request.get_json()
         image_id = data['image_id']
         weights = data['model']
         annotations = data['annotations']
-        annotation_dir = user.get_path('annotations')
+        annotation_dir = g.user.get_path('annotations')
 
         unique_id = str(uuid.uuid4())
         annotation_filename = f'{unique_id}.txt'
@@ -435,7 +530,7 @@ def save_annotations():
         paths.append(full_path)
         new_annotation = Annotation(
             id=unique_id,
-            user_id=user_id,
+            user_id=g.user.id,
             file_path=full_path,
             image_id=image_id,
             weights_id=weights['id'],
@@ -475,7 +570,9 @@ def save_annotations():
     
 @app.route('/export-annotations', methods=['POST'])
 def export_annotations():
-    user_id = session['user_id']
+    if not g.user:
+        return jsonify({"error": "No active session"}), 401
+
     try:
         # Get both CSV data and current image name from request
         data = request.json
@@ -494,7 +591,7 @@ def export_annotations():
                 download_name=f'{base_name}.txt'
             )
 
-        user_upload_dir = os.path.join('users', user_id, 'uploads')
+        user_upload_dir = os.path.join('users', g.user.id, 'uploads')
 
         # Get current TIFF path
         tiff_path = os.path.join(user_upload_dir, original_filename)
@@ -570,11 +667,10 @@ def upload_cropped_file():
 
 @app.route('/user-images', methods=['GET'])
 def get_user_images():
-    user_id = session['user_id']
-    if not user_id:
-        return jsonify({'error': 'Unauthorized'}), 401
+    if not g.user:
+        return jsonify({"error": "No active session"}), 401
     
-    images = ImageRecord.query.filter_by(user_id=user_id).all()
+    images = ImageRecord.query.filter_by(user_id=g.user.id).all()
 
     image_list = [
         {
@@ -588,12 +684,11 @@ def get_user_images():
 
 @app.route('/user-weights', methods=['GET'])
 def get_user_weights():
-    user_id = session['user_id']
-    if not user_id:
-        return jsonify({'error': 'Unauthorized'}), 401
+    if not g.user:
+        return jsonify({"error": "No active session"}), 401
     
     weights = Weights.query.filter(
-        or_(Weights.user_id == user_id, Weights.user_id == None)
+        or_(Weights.user_id == g.user.id, Weights.user_id == None)
     ).all()
 
     return jsonify([wts.to_dict() for wts in weights])
