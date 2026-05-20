@@ -108,6 +108,16 @@ export default function CellAnnotationTool() {
     if (isZ && isModifierPressed && undoStack.length > 0) {
       handleRemoveBox(undoStack[undoStack.length - 1])
     }
+
+    if (/^\d$/.test(e.key)) {
+      const num = parseInt(e.key, 10)
+      // Map 0 to index 9, otherwise map x to x - 1
+      const targetClassIndex = num === 0 ? 9 : num - 1
+
+      if (targetClassIndex < classes.length) {
+        setCurrentClass(targetClassIndex)
+      }
+    }
   }
 
   window.addEventListener('keydown', handleKeyDown)
