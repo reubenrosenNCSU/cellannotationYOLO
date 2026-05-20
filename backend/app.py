@@ -675,7 +675,8 @@ def get_user_images():
     image_list = [
         {
             'id': img.id,
-            'url': f"/static/{img.normalized_path}" 
+            'url': f"/static/{img.normalized_path}",
+            'name': f'{img.original_filename}{img.original_extension}'
         } 
         for img in images
     ]
@@ -692,6 +693,31 @@ def get_user_weights():
     ).all()
 
     return jsonify([wts.to_dict() for wts in weights])
+
+@app.route('/load-annotations', methods=['POST'])
+def load_annotations():
+    if not g.user:
+        return jsonify({"error": "No active session"}), 401
+    
+    data = request.get_json()
+    if not data or 'image_id' not in data:
+        return jsonify({"error": "Missing image_id in request body"}), 400
+
+    image_id = data['image_id']
+    annotations = Annotation.query.filter_by(
+        user_id=g.user.id, 
+        image_id=image_id
+    ).all()
+
+    results = []
+    for ann in annotations:
+        results.append({
+            "weights_id": ann.weights_id,
+            "annotations": ann.annotations,  # SQLAlchemy parses JSON columns automatically
+            "count": ann.count
+        })
+
+    return jsonify({"annotations": results}), 200
 
 @app.route('/preview-tiff', methods=['POST'])
 def preview_tiff():

@@ -11,7 +11,7 @@ import {
 } from '@mui/material';
 import CloseIcon from '@mui/icons-material/Close';
 
-const  GalleryMenu = ({ open, handleClose, images, onImageClick, onFooterButtonClick }) => {
+const  GalleryMenu = ({ open, handleClose, images, onImageClick, onButtonClick }) => {
   return (
     <Dialog 
       open={open} 
@@ -47,7 +47,7 @@ const  GalleryMenu = ({ open, handleClose, images, onImageClick, onFooterButtonC
               </ImageListItem>
               <Button 
                 variant="contained" 
-                onClick={onFooterButtonClick}
+                onClick={onButtonClick}
               >
                 Delete
               </Button>

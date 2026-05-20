@@ -141,8 +141,8 @@ export default function CellAnnotationTool() {
         url: `${API_BASE_URL}${item.url}`
       }));
 
-      setImageList(formattedData);
-      console.log(formattedData);
+      setImageList(formattedData)
+      console.log(formattedData)
     })
     fetch(`${API_BASE_URL}/user-weights`, { credentials: 'include' })
     .then(res => res.json())
@@ -155,7 +155,7 @@ export default function CellAnnotationTool() {
       setClasses(allLabels)
       setCurrentClass(0)
     })
-  }, []);
+  }, [isAuthReady])
 
   useEffect(() => {
     if (!isAuthReady) return
@@ -272,7 +272,7 @@ export default function CellAnnotationTool() {
         setImageID(data.image_id)
         setImageURL(`${API_BASE_URL}${data.converted_url}`)
         setImageSize({width: data.dimensions[0], height: data.dimensions[1]})
-        setAnnotations([])
+        setAnnotations(models.map(() => []))
     } catch(e) {
       alert('Upload failed: ' + (e.response?.data?.error || e.message))
     } finally {
@@ -387,10 +387,39 @@ export default function CellAnnotationTool() {
   }
 
   // Handler for clicking a specific image
-  const handleLoadImage = (image) => {
+  async function handleLoadImage(image)  {
     console.log("Selected Image ID:", image.id)
     setImageURL(image.url)
     setImageID(image.id)
+    setImageName(image.name)
+
+    try {
+      const res = await fetch(`${API_BASE_URL}/load-annotations`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ image_id: image.id }),
+        credentials: 'include', // Updates the browser cookie to the existing user's UUID
+      })
+
+      if (!res.ok) throw new Error('Load failed')
+      const data = await res.json()
+      console.log(data)
+      const organizedAnnotations = models.map(() => [])
+      
+      data.annotations.forEach((item) => {
+        const modelIndex = models.findIndex(m => m.id === item.weights_id)
+        
+        if (modelIndex !== -1) {
+          organizedAnnotations[modelIndex] = item.annotations
+        }
+
+        setAnnotations(organizedAnnotations)
+      })
+    } catch (e) {
+      console.error('Annotation load failed:', e.message)
+    }
     // TODO: Handle annotations
 
     if (galleryMenuOpen) {
