@@ -121,17 +121,6 @@ export default function CellAnnotationTool() {
   useEffect(() => {
     if (!isAuthReady) return
 
-    if (annotations_old.length > 0) {
-      detectCellDiameter()
-    }
-
-    console.log(annotations)
-    console.log(currentModel)
-  }, [annotations, annotations_old])
-
-  useEffect(() => {
-    if (!isAuthReady) return
-
     loadImages()
     loadModels()
     setAnnotations(models.map(() => []))
@@ -698,84 +687,38 @@ export default function CellAnnotationTool() {
   // *----------* Detection Operations *----------* \\
 
   async function detect() {
-    const formData = new FormData()
-
-    let endpoint = ''
-    let payload = null
-    let headers = {}
-
-    if (currentModel_old === 0) {
-      endpoint = `${API_BASE_URL}/detect-sgn`
-    } else if (currentModel_old === 1) {
-      endpoint = `${API_BASE_URL}/detect-cd3`
-    } else if (currentModel_old === 2) {
-      endpoint = `${API_BASE_URL}/detect-madm`
-    } else if (currentModel_old === 3) {
-      if (!customModel) {
-        alert('Please upload a custom model (.pt)')
-        return
-      }
-      endpoint = `${API_BASE_URL}/detect-custom`
-      formData.append('pt_file', customModel)
-      formData.append('model_type', customModelType)
-      formData.append('threshold', threshold)
-      formData.append('cell_diameter', cellDiameter)
-
-      payload = formData
-    } else {
-      console.log('Invalid Model Selection')
+    if (!imageURL || !models[currentModel]) {
+      alert('Please select both an image and a model before running detection.')
       return
-    }
-
-    if (!payload) {
-      payload = JSON.stringify({
-        threshold: threshold,
-        cell_diameter: cellDiameter
-      })
-
-      headers['Content-Type'] = 'application/json'
     }
 
     setIsLoading(true)
     try {
-      const res = await fetch(endpoint, {
+      const res = await fetch(`${API_BASE_URL}/detect`, {
         method: 'POST',
-        headers: headers,
-        body: payload,
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          image_id: imageID,
+          model_id: models[currentModel].id,
+          threshold: threshold,
+          cell_diameter: cellDiameter
+        }),
         credentials: 'include',
       })
-      console.log(res)
-      if (!res.ok) throw new Error(`${models_old[currentModel_old]} detection failed`)
+
+      if (!res.ok) throw new Error(`${models[currentModel].name} detection failed`)
       const data = await res.json()
       
-      const yoloTxt = data.annotations
-      const imgWidth = data.image_width
-      const imgHeight = data.image_height
+      const newAnnotations = data.annotations
 
-      setAnnotations_old([])
-      let importedCount = 0
-
-      yoloTxt.split('\n').forEach(line => {
-        if (!line.trim()) return
-        const parts = line.trim().split(' ')
-        const cls = parseInt(parts[0])
-        const cx = parseFloat(parts[1]) * imgWidth
-        const cy = parseFloat(parts[2]) * imgHeight
-        const w = parseFloat(parts[3]) * imgWidth
-        const h = parseFloat(parts[4]) * imgHeight
-        const x1 = cx - w / 2
-        const y1 = cy - h / 2
-        const confidence = parts[5] ? parseFloat(parts[5]) : null
-
-        let annotationClass = cls
-        if (currentModel_old === 0) {
-          annotationClass = 2
-        }
-        handleAddBox({x: x1, y: y1, w: w, h: h, class: annotationClass, confidence})
-
-        importedCount++
+      // Directly assign the structured array to the current model's index in the 2D state array
+      setAnnotations((prevAnnotations) => {
+        const updated = [...prevAnnotations]
+        updated[currentModel] = newAnnotations
+        return updated
       })
-      alert(`Detected ${importedCount} ${models_old[currentModel_old]} objects!`)
     } catch (e) {
       alert('Detection failed: ' + (e.response?.data?.error || e.message))
     } finally {
