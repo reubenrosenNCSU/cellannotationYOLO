@@ -694,6 +694,7 @@ def get_user_weights():
 
     return jsonify([wts.to_dict() for wts in weights])
 
+
 @app.route('/load-annotations', methods=['POST'])
 def load_annotations():
     if not g.user:
@@ -719,7 +720,56 @@ def load_annotations():
 
     return jsonify({"annotations": results}), 200
 
-@app.route('/preview-tiff', methods=['POST'])
+
+# *----------* Data Removal Endpoints *----------* #
+@app.route('/delete-image', methods=['DELETE'])
+def delete_image():
+    if not g.user:
+        return jsonify({"error": "No active session"}), 401
+    
+    data = request.get_json()
+    if not data or 'image_id' not in data:
+        return jsonify({"error": "Missing image_id in request body"}), 400
+    
+    image_id = data['image_id']
+    
+    try:
+        # Fetch  image and verify ownership
+        image = ImageRecord.query.filter_by(id=image_id, user_id=g.user.id).first()
+        if not image:
+            return jsonify({"error": "Image not found or unauthorized"}), 404
+        
+        # Set paths for cleanup
+        original_path = os.path.join('data', image.original_path)
+        norm_path = os.path.join('data', image.normalized_path)
+        annotation_paths = [ann.file_path for ann in image.annotations if ann.file_path]
+        
+        # Update database
+        db.session.delete(image)
+        db.session.commit()
+
+        # Execute cleanup
+        if os.path.exists(original_path):
+            os.remove(original_path)
+
+        if os.path.exists(norm_path):
+            os.remove(norm_path)
+        
+        for ann_path in annotation_paths:
+            if os.path.exists(ann_path):
+                os.remove(ann_path)
+        
+        return jsonify({
+            "success": True, 
+            "message": "Image record successfully deleted"
+        }), 200
+        
+    except Exception as e:
+        db.session.rollback()
+        print(f"CRITICAL: Failed to execute deletion routine for image {image_id}: {e}")
+        return jsonify({"error": "Internal server error occurred during deletion structural sweep"}), 500
+
+@app.route('/preview-tiff', methods=['POST']) #TODO: Remove
 def preview_tiff():
     tmp_in_path = None
     tmp_out_path = None
@@ -755,13 +805,13 @@ def preview_tiff():
 from scripts.detect_tiles import detect_tiles_in_batch
 
 
-@app.route('/converted/<filename>')
+@app.route('/converted/<filename>') #TODO: Remove
 def serve_converted(filename):
     user_id = session['user_id']
     converted_dir = os.path.join('users', user_id, 'converted')
     return send_from_directory(converted_dir, filename)
 
-@app.route('/tile/<filename>/<int:tx>/<int:ty>/<int:tile_size>')
+@app.route('/tile/<filename>/<int:tx>/<int:ty>/<int:tile_size>') #TODO: Update
 def serve_tile(filename, tx, ty, tile_size):
     user_id = session['user_id']
     filename = secure_filename(filename)
@@ -780,7 +830,7 @@ def serve_tile(filename, tx, ty, tile_size):
     buf.seek(0)
     return send_file(buf, mimetype='image/png')
 
-@app.route('/save-training-data', methods=['POST'])
+@app.route('/save-training-data', methods=['POST']) #TODO: Update
 def save_training_data():
     user_id = session['user_id']
     try:
@@ -861,7 +911,7 @@ def save_training_data():
         print(f"Error saving training data: {str(e)}")
         return jsonify({'error': str(e)}), 500
 
-@app.route('/get-all-training-data', methods=['GET'])
+@app.route('/get-all-training-data', methods=['GET'])  #TODO: Update/Move
 def get_all_training_data():
     user_id = session.get('user_id')
     if not user_id:
@@ -897,7 +947,7 @@ def get_all_training_data():
     return jsonify(results)
     
 
-@app.route('/clear-training-data', methods=['POST'])
+@app.route('/clear-training-data', methods=['POST'])  #TODO: Update
 def clear_training_data():
     user_id = session['user_id']
     saved_data_dir = os.path.join('users', user_id, 'saved_data')
@@ -927,7 +977,7 @@ def clear_training_data():
 
 import os
 
-@app.route('/delete-training-data/<unique_id>', methods=['DELETE'])
+@app.route('/delete-training-data/<unique_id>', methods=['DELETE'])  #TODO: Update
 def delete_training_data(unique_id):
     user_id = session.get('user_id')
     if not user_id:
@@ -975,7 +1025,7 @@ def delete_training_data(unique_id):
         return jsonify({'error': str(e)}), 500
     
 
-@app.route('/download-training-data', methods=['GET'])
+@app.route('/download-training-data', methods=['GET'])  #TODO: Update
 def download_training_data():
     user_id = session.get('user_id')
     if not user_id:
@@ -1015,7 +1065,7 @@ def download_training_data():
         download_name=f'yolo_dataset_{user_id}.zip'
     )
 
-@app.route('/detect-madm', methods=['POST'])
+@app.route('/detect-madm', methods=['POST'])  #TODO: Update
 def detect_madm():
     user_id = session['user_id']
     threshold = float(request.json.get('threshold', 0.5))
@@ -1065,7 +1115,7 @@ def detect_madm():
         return jsonify({'error': str(e), 'traceback': error_details}), 500
 
 
-@app.route('/detect-sgn', methods=['POST'])
+@app.route('/detect-sgn', methods=['POST']) #TODO: Update
 def detect_sgn():
     user_id = session['user_id']
     threshold = float(request.json.get('threshold', 0.5))
@@ -1115,7 +1165,7 @@ def detect_sgn():
         return jsonify({'error': str(e), 'traceback': error_details}), 500
 
 
-@app.route('/detect-cd3', methods=['POST'])
+@app.route('/detect-cd3', methods=['POST']) #TODO: Update
 def detect_cd3():
     user_id = session['user_id']
     threshold = float(request.json.get('threshold', 0.5))
@@ -1158,7 +1208,7 @@ def detect_cd3():
         return jsonify({'error': f'CD3 detection failed: {str(e)}'}), 500
 
 
-@app.route('/train-saved', methods=['POST'])
+@app.route('/train-saved', methods=['POST']) #TODO: Update
 def train_saved_data():
     import shutil
     import time
@@ -1401,7 +1451,7 @@ def train_saved_data():
 
 
     
-@app.route('/detect-custom', methods=['POST'])
+@app.route('/detect-custom', methods=['POST']) #TODO: Update
 def detect_custom():
     user_id = session['user_id']
     upload_dir = os.path.join('users', user_id, 'uploads')
@@ -1448,7 +1498,7 @@ def detect_custom():
     except Exception as e:
         return jsonify({'error': f"SAHI Detection failed: {str(e)}"}), 500
 
-@app.route('/scale-image', methods=['POST'])
+@app.route('/scale-image', methods=['POST']) #TODO: Remove
 def scale_image():
     user_id = session['user_id']
     upload_dir = os.path.join('users', user_id, 'uploads')
@@ -1505,7 +1555,7 @@ def scale_image():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
     
-@app.route('/detect-finetuned', methods=['POST'])
+@app.route('/detect-finetuned', methods=['POST']) #TODO: Update
 def detect_finetuned():
     user_id = session['user_id']
     try:
@@ -1554,7 +1604,7 @@ def detect_finetuned():
         return jsonify({'error': str(e), 'traceback': error_details}), 500
 
 
-@app.route('/batch-detect', methods=['POST'])
+@app.route('/batch-detect', methods=['POST']) #TODO: Update
 def batch_detect():
     user_id = session.get('user_id')
     if not user_id:
@@ -1708,13 +1758,13 @@ def batch_detect():
     
 
 
-@app.route('/snapshots/<path:filename>')
+@app.route('/snapshots/<path:filename>') #TODO: Remove
 def serve_snapshot(filename):
     user_id = session['user_id']
     snapshot_dir = os.path.join('users', user_id, 'snapshots')
     return send_from_directory(snapshot_dir, filename)
 
-@app.route('/api/preview/<filename>')
+@app.route('/api/preview/<filename>') #TODO: Remove
 def serve_thumbnail(filename):
     user_id = session['user_id']
     
@@ -1724,13 +1774,13 @@ def serve_thumbnail(filename):
     
     return send_from_directory(directory, filename)
 
-@app.route('/api/images/<filename>')
+@app.route('/api/images/<filename>') #TODO: Remove
 def serve_original_image(filename):
     user_id = session.get('user_id')
     directory = os.path.join('users', user_id, 'saved_data')
     return send_from_directory(directory, filename)
 
-@app.route('/api/annotations/<filename>')
+@app.route('/api/annotations/<filename>') #TODO: Remove
 def serve_annotation_file(filename):
     user_id = session.get('user_id')
     directory = os.path.join('users', user_id, 'saved_annotations')
@@ -1742,7 +1792,7 @@ from tensorflow.python.summary.summary_iterator import summary_iterator
 import os
 import glob
 
-@app.route('/events-data', methods=['GET'])
+@app.route('/events-data', methods=['GET']) #TODO: Update
 def events_data():
     user_id = session.get('user_id')
     base_path = os.path.join('users', user_id, 'snapshots')
@@ -1791,7 +1841,7 @@ def events_data():
 
 
 
-def delete_expired_sessions():
+def delete_expired_sessions(): #TODO: Update
     now = datetime.datetime.utcnow()  # Use UTC time
     users_dir = 'users'
     for user_id in os.listdir(users_dir):

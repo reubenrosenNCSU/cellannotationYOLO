@@ -132,29 +132,8 @@ export default function CellAnnotationTool() {
   useEffect(() => {
     if (!isAuthReady) return
 
-    fetch(`${API_BASE_URL}/user-images`, { credentials: 'include' })
-    .then(res => res.json())
-    .then(data => {
-      const formattedData = data.map(item => ({
-        ...item,
-        // Prepend the base URL
-        url: `${API_BASE_URL}${item.url}`
-      }));
-
-      setImageList(formattedData)
-      console.log(formattedData)
-    })
-    fetch(`${API_BASE_URL}/user-weights`, { credentials: 'include' })
-    .then(res => res.json())
-    .then(data => {
-      setModels(data)
-      setCurrentModel(0)
-      setAnnotations(Array.from({ length: data.length }, () => []))
-      console.log(data)
-      const allLabels = data.map(item => item.label_set.labels)
-      setClasses(allLabels)
-      setCurrentClass(0)
-    })
+    loadImages()
+    
   }, [isAuthReady])
 
   useEffect(() => {
@@ -182,6 +161,36 @@ export default function CellAnnotationTool() {
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
   })
+
+  // *----------* Helper Functions *----------* \\
+  async function loadImages() {
+    fetch(`${API_BASE_URL}/user-images`, { credentials: 'include' })
+    .then(res => res.json())
+    .then(data => {
+      const formattedData = data.map(item => ({
+        ...item,
+        // Prepend the base URL
+        url: `${API_BASE_URL}${item.url}`
+      }));
+
+      setImageList(formattedData)
+      console.log(formattedData)
+    })
+  }
+
+  async function loadModels() {
+    fetch(`${API_BASE_URL}/user-weights`, { credentials: 'include' })
+    .then(res => res.json())
+    .then(data => {
+      setModels(data)
+      setCurrentModel(0)
+      setAnnotations(Array.from({ length: data.length }, () => []))
+      console.log(data)
+      const allLabels = data.map(item => item.label_set.labels)
+      setClasses(allLabels)
+      setCurrentClass(0)
+    })
+  }
 
   // *----------* User Operations *----------* \\
 
@@ -427,9 +436,23 @@ export default function CellAnnotationTool() {
     }
   }
 
-  // Handler for the footer button
-  const handleDeleteImage = () => {
-    alert("Parent function triggered from Modal footer!")
+  async function handleDeleteImage(image_id) {
+    try {
+      const res = await fetch(`${API_BASE_URL}/delete-image`, {
+        method: 'DELETE',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ image_id: image_id }),
+          credentials: 'include'
+      })
+      if (!res.ok) throw new Error('Delete failed')
+        console.loog(res)
+      const data = await res.json()
+      console.log(data)
+    } catch (e) {
+      console.error('Image deletion failed:', e.message)
+    }
   }
 
   // const handleBrightnessChange = (event, newValue) => {
@@ -1863,7 +1886,7 @@ export default function CellAnnotationTool() {
             handleClose={() => setGalleryMenuOpen(false)}
             images={imageList}
             onImageClick={handleLoadImage}
-            onFooterButtonClick={handleDeleteImage}
+            onButtonClick={handleDeleteImage}
           />
           <Button variant='contained' component='label' onClick={handleSave} sx={{...button_style_span}}>
             Save Image

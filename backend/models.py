@@ -80,13 +80,13 @@ class User(db.Model):
 
 class ImageRecord(db.Model):
     id = db.Column(db.String(36), primary_key=True)
-    user_id = db.Column(db.String(36), db.ForeignKey('user.id'), nullable=False)
+    user_id = db.Column(db.String(36), db.ForeignKey('user.id', ondelete='CASCADE'), nullable=False)
     original_filename = db.Column(db.String(255))
     original_extension = db.Column(db.String(16))
     
     # Paths to the physical files
-    original_path = db.Column(db.String(512)) # The original image
-    normalized_path = db.Column(db.String(512)) # The normalized PNG (If original is PNG, paths will be the same)
+    original_path = db.Column(db.String(512)) # Original image
+    normalized_path = db.Column(db.String(512)) # Normalized PNG
     # cropped_path = db.Column(db.String(512))
     
     created_at = db.Column(db.DateTime, default=datetime.datetime.utcnow)
@@ -99,16 +99,18 @@ class ImageRecord(db.Model):
     p_low = db.Column(db.Integer)
     p_high = db.Column(db.Integer)
 
+    annotations = db.relationship('Annotation', cascade='all, delete-orphan', backref='image_record')
+
 
 
 class Annotation(db.Model):
     id = db.Column(db.String(36), primary_key=True)
-    user_id = db.Column(db.String(36), db.ForeignKey('user.id'), nullable=False)
+    user_id = db.Column(db.String(36), db.ForeignKey('user.id', ondelete='CASCADE'), nullable=False)
 
     file_path = db.Column(db.String(512))
     created_at = db.Column(db.DateTime, default=datetime.datetime.utcnow)
 
-    image_id = db.Column(db.String(36), db.ForeignKey('image_record.id'))
+    image_id = db.Column(db.String(36), db.ForeignKey('image_record.id', ondelete='CASCADE'))
     weights_id = db.Column(db.String(36), db.ForeignKey('weights.id'), nullable=False)
     
     annotations = db.Column(db.JSON, nullable=False)
@@ -118,7 +120,7 @@ class Annotation(db.Model):
 
 class LabelSet(db.Model):
     id = db.Column(db.String(36), primary_key=True)
-    user_id = db.Column(db.String(36), db.ForeignKey('user.id'), nullable=False)
+    user_id = db.Column(db.String(36), db.ForeignKey('user.id', ondelete='CASCADE'), nullable=False)
     labels = db.Column(db.JSON, nullable=False)
 
     def to_dict(self):
@@ -131,7 +133,7 @@ class LabelSet(db.Model):
 
 class Weights(db.Model):
     id = db.Column(db.String(36), primary_key=True)
-    user_id = db.Column(db.String(36), db.ForeignKey('user.id'), nullable=True)
+    user_id = db.Column(db.String(36), db.ForeignKey('user.id', ondelete='CASCADE'), nullable=True)
     name = db.Column(db.String(100))
     file_path = db.Column(db.String(512))
     is_default = db.Column(db.Boolean, default=False)

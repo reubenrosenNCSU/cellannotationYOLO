@@ -40,14 +40,14 @@ const  GalleryMenu = ({ open, handleClose, images, onImageClick, onButtonClick }
               >
                 <img
                   src={img.url}
-                  alt={img.title || `image-${index}`}
+                  alt={img.name || `image-${index}`}
                   loading="lazy"
                   style={{ borderRadius: '4px' }}
                 />
               </ImageListItem>
               <Button 
                 variant="contained" 
-                onClick={onButtonClick}
+                onClick={() => onButtonClick(img.id)}
               >
                 Delete
               </Button>
