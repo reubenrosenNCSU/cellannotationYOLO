@@ -31,6 +31,7 @@ from PIL import Image
 import tifffile
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy import or_
+from sqlalchemy.orm.attributes import flag_modified
 # Disable decompression bomb protection for large TIFF files
 Image.MAX_IMAGE_PIXELS = None
 
@@ -516,7 +517,7 @@ def upload_custom_model():
 def save_annotations():
     if not g.user:
         return jsonify({"error": "No active session"}), 401
-    paths = []
+    full_path = ''
     try:
         data = request.get_json()
         image_id = data['image_id']
@@ -524,20 +525,37 @@ def save_annotations():
         annotations = data['annotations']
         annotation_dir = g.user.get_path('annotations')
 
-        unique_id = str(uuid.uuid4())
-        annotation_filename = f'{unique_id}.txt'
-        full_path = os.path.join('data', annotation_dir, annotation_filename)
-        paths.append(full_path)
-        new_annotation = Annotation(
-            id=unique_id,
-            user_id=g.user.id,
-            file_path=full_path,
-            image_id=image_id,
-            weights_id=weights['id'],
-            annotations=annotations,
-            count=len(annotations)
-        )
-        db.session.add(new_annotation)
+        existing_annotation = Annotation.query.filter_by(
+            image_id=image_id, 
+            weights_id=weights['id'], 
+            user_id=g.user.id
+        ).first()
+
+        if existing_annotation:
+            unique_id = existing_annotation.id
+            full_path = existing_annotation.file_path
+            existing_annotation.annotations = list(annotations)
+            existing_annotation.count = len(annotations)
+            
+            flag_modified(existing_annotation, "annotations")
+        else:
+            unique_id = str(uuid.uuid4())
+            annotation_filename = f'{unique_id}.txt'
+            full_path = os.path.join('data', annotation_dir, annotation_filename)
+            
+            new_annotation = Annotation(
+                id=unique_id,
+                user_id=g.user.id,
+                file_path=full_path,
+                image_id=image_id,
+                weights_id=weights['id'],
+                annotations=annotations,
+                count=len(annotations)
+            )
+            db.session.add(new_annotation)
+
+        db.session.commit()
+
         yolo_lines = []
         for ann in annotations:
             line = "{0} {1:.6f} {2:.6f} {3:.6f} {4:.6f}".format(
@@ -548,19 +566,17 @@ def save_annotations():
                 ann['h']
             )
             yolo_lines.append(line)
-            
+        
         # Save annotation file
         with open(full_path, 'w') as f:
             f.write("\n".join(yolo_lines))
 
-        db.session.commit()
         return jsonify({'message': 'Success'}), 200
 
     except Exception as e:
         db.session.rollback()
-        for path in paths:
-            if os.path.exists(path):
-                os.remove(path)
+        if os.path.exists(full_path):
+            os.remove(full_path)
         print(f"Error saving annotations: {str(e)}")
         return jsonify({'error': str(e)}), 500
     
@@ -592,9 +608,8 @@ def save_color():
         labels_copy[class_index]['color'] = new_color
         model.label_set.labels = labels_copy
 
-        from sqlalchemy.orm.attributes import flag_modified
         flag_modified(model.label_set, "labels")
-        
+
         db.session.commit()
         return jsonify({"success": True, "message": "Color updated successfully"}), 200
 
@@ -667,7 +682,6 @@ def upload_cropped_file():
         height = int(float(request.form['height']))
 
         image_record = db.session.get(ImageRecord, image_id)
-
         if not image_record:
             return jsonify({'error': 'Image record not found'}), 404
 
@@ -682,17 +696,41 @@ def upload_cropped_file():
 
         # Create and normalize png conversion of cropped image
         output_path = os.path.join('data', image_record.normalized_path)
-        
         p_low = image_record.p_low
         p_high = image_record.p_high
         normalize_image(temp_crop_path, output_path, p_low=p_low, p_high=p_high)
 
+        existing_annotations = Annotation.query.filter_by(image_id=image_id).all()
+
+        for annotation in existing_annotations:
+            filtered = [
+                ann for ann in annotation.annotations
+                if (x <= ann['x'] <= x + width and
+                    y <= ann['y'] <= y + height)
+            ]
+
+            annotation.annotations = filtered
+            annotation.count = len(filtered)
+            flag_modified(annotation, "annotations")
+
+            # Overwrite physical annotation file
+            yolo_lines = []
+            for ann in filtered:
+                yolo_lines.append("{0} {1:.6f} {2:.6f} {3:.6f} {4:.6f}".format(
+                    ann['class'], ann['x'], ann['y'], ann['w'], ann['h']
+                ))
+            with open(annotation.file_path, 'w') as f:
+                f.write("\n".join(yolo_lines))
+        
+        db.session.commit()
+        
         return jsonify({
             'converted_url': f'/static/{image_record.normalized_path}',
             'original_name': image_record.original_filename
         })
 
     except Exception as e:
+        db.session.rollback()
         print(f"Error in upload-cropped: {str(e)}")
         return jsonify({'error': f"Server error: {str(e)}"}), 500
     

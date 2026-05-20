@@ -382,23 +382,25 @@ export default function CellAnnotationTool() {
         if (!res.ok) throw new Error('Crop failed')
         const data = await res.json()
 
-        setAnnotations_old((prevAnnotations) => {
-          return prevAnnotations.filter((anno) => {
-            // A box is "inside" if its boundaries are within the crop box boundaries
-            const isInside =
-              anno.x >= box.x &&
-              anno.y >= box.y &&
-              (anno.x + anno.w) <= (box.x + box.w) &&
-              (anno.y + anno.h) <= (box.y + box.h)
+        setAnnotations((prevAnnotations) => {
+          // Map over each model's sub-array of annotations
+          return prevAnnotations.map((modelAnnos) => {
+            return modelAnnos.filter((anno) => {
+              // A box is "inside" if its boundaries are within the crop box boundaries
+              const isInside =
+                anno.x >= box.x &&
+                anno.y >= box.y &&
+                (anno.x + anno.w) <= (box.x + box.w) &&
+                (anno.y + anno.h) <= (box.y + box.h)
 
-            return isInside
+              return isInside
+            })
           })
         })
 
         // Add a timestamp as a query parameter (?t=123456789)
         setImageURL(`${API_BASE_URL}${data.converted_url}?t=${new Date().getTime()}`)
         //setImageSize({width: box.width, height: box.height})
-        
     } catch(e) {
       alert('Crop failed: ' + (e.response?.data?.error || e.message))
     }
@@ -549,12 +551,11 @@ export default function CellAnnotationTool() {
   }
 
   async function saveAnnotations() {
-    const formData = new FormData()
-
     setIsLoading(true)
+
     try {
       for (const [i, list] of annotations.entries()) {
-        if (!list || list.length < 1) continue;
+        if (!list || list.length < 1) continue
 
         const res = await fetch(`${API_BASE_URL}/save-annotations`, {
           method: 'POST',
@@ -565,13 +566,12 @@ export default function CellAnnotationTool() {
             model: models[i],
           }),
           credentials: 'include',
-        });
+        })
 
         if (!res.ok) throw new Error(`Save failed for model at index ${i}`);
         
-        console.log(`Saved index ${i} successfully`);
+        console.log(`Saved index ${i} successfully`)
       }
-      alert("All annotations saved!");
       //const data = await res.json()
     } catch(e) {
       alert('Save failed: ' + (e.response?.data?.error || e.message))
