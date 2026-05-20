@@ -133,7 +133,8 @@ export default function CellAnnotationTool() {
     if (!isAuthReady) return
 
     loadImages()
-    
+    loadModels()
+    setAnnotations(models.map(() => []))
   }, [isAuthReady])
 
   useEffect(() => {
@@ -155,6 +156,16 @@ export default function CellAnnotationTool() {
 
       if (isZ && isModifierPressed && undoStack.length > 0) {
         handleRemoveBox(undoStack[undoStack.length - 1])
+      }
+
+      if (/^\d$/.test(e.key)) {
+        const num = parseInt(e.key, 10)
+        // Map 0 to index 9, otherwise map x to x - 1
+        const targetClassIndex = num === 0 ? 9 : num - 1
+
+        if (targetClassIndex < classes[currentModel].length) {
+          setCurrentClass(targetClassIndex)
+        }
       }
     }
 
@@ -184,7 +195,6 @@ export default function CellAnnotationTool() {
     .then(data => {
       setModels(data)
       setCurrentModel(0)
-      setAnnotations(Array.from({ length: data.length }, () => []))
       console.log(data)
       const allLabels = data.map(item => item.label_set.labels)
       setClasses(allLabels)
@@ -246,16 +256,6 @@ export default function CellAnnotationTool() {
     } catch (err) {
       console.error('Login failed:', err.message)
     }
-
-    if (/^\d$/.test(e.key)) {
-      const num = parseInt(e.key, 10)
-      // Map 0 to index 9, otherwise map x to x - 1
-      const targetClassIndex = num === 0 ? 9 : num - 1
-
-      if (targetClassIndex < classes.length) {
-        setCurrentClass(targetClassIndex)
-      }
-    }
   }
 
   
@@ -295,6 +295,7 @@ export default function CellAnnotationTool() {
     } catch(e) {
       alert('Upload failed: ' + (e.response?.data?.error || e.message))
     } finally {
+      loadImages()
       setIsLoading(false)
     }
   }
@@ -411,6 +412,7 @@ export default function CellAnnotationTool() {
     setImageURL(image.url)
     setImageID(image.id)
     setImageName(image.name)
+    setImageSize({width: image.dimensions[0], height: image.dimensions[1]})
 
     try {
       const res = await fetch(`${API_BASE_URL}/load-annotations`, {
@@ -457,11 +459,17 @@ export default function CellAnnotationTool() {
           credentials: 'include'
       })
       if (!res.ok) throw new Error('Delete failed')
-        console.loog(res)
-      const data = await res.json()
-      console.log(data)
+      console.log(res)
+      if (image_id = imageID) {
+        setImageID('')
+        setImageName('')
+        setImageURL('')
+        setImageSize({width: 0, height: 0})
+      }
     } catch (e) {
       console.error('Image deletion failed:', e.message)
+    } finally {
+      loadImages()
     }
   }
 
@@ -505,11 +513,30 @@ export default function CellAnnotationTool() {
     //detectCellDiameter()
   }
 
-  const handleColorUpdate = (index, newColor) => {
-    setClasses_old((prevClasses) => {
-      // Create a copy of the array to maintain immutability
+  async function handleColorUpdate(index, newColor) {
+    const res = await fetch(`${API_BASE_URL}/save-color`, {
+      method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ 
+          model_id: models[currentModel].id,
+          index: index,
+          color: newColor 
+        }),
+        credentials: 'include'
+    })
+    if (!res.ok) throw new Error('Color update failed')
+    setClasses((prevClasses) => {
+      // Deeply copy the outer array and the target inner array to maintain immutability
       const updated = [...prevClasses]
-      updated[index] = { ...updated[index], color: newColor }
+      updated[currentModel] = [...updated[currentModel]]
+      
+      // Update the color property of the specific class object
+      updated[currentModel][index] = { 
+        ...updated[currentModel][index], 
+        color: newColor 
+      }
       return updated
     })
   }
@@ -1337,40 +1364,29 @@ export default function CellAnnotationTool() {
                 </Button>
                 <Menu {...bindMenu(popupState)}>
                   {classes[currentModel]?.map((item, index) => (
-                    <MenuItem 
-                      key={index}
-                      onClick={() => {setCurrentClass(index)}}
-                    >
-                        <Typography variant='body1'>{item.name}</Typography>
-                    </MenuItem>
+                    <Box display="flex" alignItems="center" gap={2}>
+                      <input
+                        type="color"
+                        value={item.color}
+                        onChange={(e) => handleColorUpdate(index, e.target.value)}
+                        onClick={(e) => e.stopPropagation()} // Prevents menu closing on click
+                        style={{
+                          width: '24px',
+                          height: '24px',
+                          padding: 0,
+                          border: 'none',
+                          borderRadius: '4px', // Optional: rounded corners
+                          cursor: 'pointer',
+                          backgroundColor: 'transparent',
+                        }}
+                      />
+                      <Typography variant="body1">{item.name}</Typography>
+                    </Box>
                   ))}
                 </Menu>
               </Fragment>
             )}
           </PopupState>
-          <PopupState variant='popover' popupId='class-popup-menu'>
-            {(popupState) => (
-              <Fragment>
-                <Button variant='contained' {...bindTrigger(popupState)} endIcon={<KeyboardArrowDownIcon />} sx={{...button_style_span, mt: 1}}>
-                  {classes_old[currentClass_old].name}
-                </Button>
-                <Menu {...bindMenu(popupState)}>
-                  {classes_old.map((item, index) => (
-                    <MenuItem 
-                      key={index}
-                      onClick={() => {setCurrentClass_old(index)}}
-                    >
-                        <Typography variant='body1'>{item.name}</Typography>
-                    </MenuItem>
-                  ))}
-                </Menu>
-              </Fragment>
-            )}
-          </PopupState>
-          <ColorMenu 
-            items={classes_old} 
-            onChange={handleColorUpdate} 
-          />
           <Box sx={{pt: 1, borderTop: 1, borderColor: 'grey.500'}}>
             <Typography gutterBottom variant='body1' sx={{ fontWeight: 'bold' }}>
               Manage Annotations

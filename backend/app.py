@@ -563,7 +563,45 @@ def save_annotations():
                 os.remove(path)
         print(f"Error saving annotations: {str(e)}")
         return jsonify({'error': str(e)}), 500
+    
+@app.route('/save-color', methods=['POST'])
+def save_color():
+    if not g.user:
+        return jsonify({"error": "No active session"}), 401
+    
+    data = request.get_json()
+    if not data or 'model_id' not in data or 'index' not in data or 'color' not in data:
+        return jsonify({"error": "Missing required fields"}), 400
 
+    model_id = data['model_id']
+    class_index = int(data['index'])
+    new_color = data['color']
+
+    try:
+        # Find the model that belongs to this user
+        model = Weights.query.filter_by(id=model_id, user_id=g.user.id).first()
+        if not model or not model.label_set:
+            return jsonify({"error": "Model or label set not found"}), 404
+
+        # Access and mutate the JSON array property
+        labels_copy = list(model.label_set.labels)
+        
+        if class_index < 0 or class_index >= len(labels_copy):
+            return jsonify({"error": "Class index out of bounds"}), 400
+
+        labels_copy[class_index]['color'] = new_color
+        model.label_set.labels = labels_copy
+
+        from sqlalchemy.orm.attributes import flag_modified
+        flag_modified(model.label_set, "labels")
+        
+        db.session.commit()
+        return jsonify({"success": True, "message": "Color updated successfully"}), 200
+
+    except Exception as e:
+        db.session.rollback()
+        print(f"Error updating label color: {e}")
+        return jsonify({"error": "Internal server error"}), 500
 
 
 # *----------* Data Download Endpoints *----------* #
@@ -676,7 +714,10 @@ def get_user_images():
         {
             'id': img.id,
             'url': f"/static/{img.normalized_path}",
-            'name': f'{img.original_filename}{img.original_extension}'
+            'name': f'{img.original_filename}{img.original_extension}',
+            'dimensions': [img.width, img.height],
+            'p_low': img.p_low,
+            'p_high': img.p_high
         } 
         for img in images
     ]
@@ -722,6 +763,7 @@ def load_annotations():
 
 
 # *----------* Data Removal Endpoints *----------* #
+
 @app.route('/delete-image', methods=['DELETE'])
 def delete_image():
     if not g.user:
