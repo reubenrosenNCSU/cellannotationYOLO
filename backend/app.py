@@ -427,7 +427,7 @@ def upload_custom_model():
         return jsonify({'error': str(e)}), 500
 
 
-@app.route('/save-annotations', methods=['POST']) #TODO: Finish this!!!
+@app.route('/save-annotations', methods=['POST'])
 def save_annotations():
     if not g.user:
         return jsonify({"error": "No active session"}), 401

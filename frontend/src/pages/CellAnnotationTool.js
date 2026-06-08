@@ -106,6 +106,7 @@ export default function CellAnnotationTool() {
         const data = await res.json();
         if (res.ok) {
           setUser(data.user)
+          setIsLoggedIn(data.logged_in)
           console.log(data)
         }
       } catch (err) {
@@ -532,7 +533,7 @@ export default function CellAnnotationTool() {
     })
   }
 
-  function clearAnnotations() {
+  function clearAnnotations() { //TODO: Update
     const confirm = window.confirm('Are you sure you want to delete all annotations? This cannot be undone!')
       if (!confirm) return
     
@@ -569,7 +570,7 @@ export default function CellAnnotationTool() {
     }
   }
 
-  async function exportAnnotations() {
+  async function exportAnnotations() { //TODO: Update
     const filename = imageName
     const imageWidth = imageSize.width
     const imageHeight = imageSize.height
@@ -668,7 +669,7 @@ export default function CellAnnotationTool() {
     reader.readAsText(file)
   }
 
-  function detectCellDiameter() {
+  function detectCellDiameter() { //TODO: Update
     // if (annotations.length == 0) {
     //   setDetectedDiameter(0)
     //   return
@@ -850,7 +851,7 @@ export default function CellAnnotationTool() {
     handleCloseCustomUploadModal()
   }
 
-  async function handleFineTuneDetect() {
+  async function handleFineTuneDetect() { //TODO: Phase Out
     setIsLoading(true)
     try {
       const res = await fetch(`${API_BASE_URL}/detect-finetuned`, {
@@ -903,7 +904,7 @@ export default function CellAnnotationTool() {
 
   // *----------* Training Operations *----------* \\
 
-  async function saveTrainingData() {
+  async function saveTrainingData() { //TODO: Rework
     // Normalize annotations
     console.log(imageSize)
     const normalizedAnnotations = annotations_old.map(ann => {
@@ -961,7 +962,7 @@ export default function CellAnnotationTool() {
     }
   }
 
-  async function fineTune() {
+  async function fineTune() { //TODO: Update
     if (!epochs || epochs < 1) {
       alert('Please enter valid number of epochs!')
       return
@@ -1008,7 +1009,7 @@ export default function CellAnnotationTool() {
     }
   }
 
-  async function clearTrainingData() {
+  async function clearTrainingData() { //TODO: Rework
     const confirm = window.confirm('Are you sure you want to delete all training data? This cannot be undone!')
     if (!confirm) return
 
@@ -1047,7 +1048,7 @@ export default function CellAnnotationTool() {
     setSelectedFiles(prev => prev.filter((_, i) => i !== index))
   }
 
-  const deleteTrainingDataEntry = async (uniqueId) => {
+  const deleteTrainingDataEntry = async (uniqueId) => { //TODO: Rework
     if (!window.confirm("Are you sure you want to delete this training sample?")) return
 
     try {
@@ -1067,7 +1068,7 @@ export default function CellAnnotationTool() {
     }
   }
 
-  const loadSavedEntry = async (item) => {
+  const loadSavedEntry = async (item) => { //TODO: Depricate
       const confirmLoad = window.confirm("Loading this will clear your current work. Continue?")
       if (!confirmLoad) return
 
@@ -1124,7 +1125,7 @@ export default function CellAnnotationTool() {
       }
   };
 
-  const handleModelDownload = async () => {
+  const handleModelDownload = async () => { //TODO: Update
     try {
       // 1. Prepare the URL
       // If fineTuneModelURL is "/snapshots/my_model.pt", this prepends the backend host
@@ -1164,7 +1165,7 @@ export default function CellAnnotationTool() {
     }
   }
 
-  const handleTrainingDataDownload = async () => {
+  const handleTrainingDataDownload = async () => { //TODO: Update
     try {
       const res = await fetch(`${API_BASE_URL}/download-training-data`, {
         method: 'GET',
@@ -1199,7 +1200,7 @@ export default function CellAnnotationTool() {
     }
   }
 
-  async function getMetrics() {
+  async function getMetrics() { //TODO: Rework
     try {
       const res = await fetch(`${API_BASE_URL}/events-data`, {
         method: 'GET',
@@ -1798,6 +1799,8 @@ export default function CellAnnotationTool() {
 
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', height: '100vh', width: '100vw', overflow: 'hidden' }}>
+      
+      {/* Loading Overlay */}
       {isLoading && (
         <div style={{
           position: 'fixed',
@@ -1813,32 +1816,49 @@ export default function CellAnnotationTool() {
           <p style={{ color: 'white', marginTop: 12, fontSize: 14 }}>Processing...</p>
         </div>
       )}
-      <AppBar
-        position="fixed" 
+
+      {/* Login Bar */}
+      {!isLoggedIn && (
+        <AppBar
+          position="sticky" 
+          sx={{ 
+            height: '64px', 
+            display: 'flex', 
+            flexDirection: 'row', 
+            alignItems: 'center', 
+            gap: 2, 
+            px: 2,
+            zIndex: (theme) => theme.zIndex.drawer + 1 
+          }}
+        >
+          <TextField
+            label="Username"
+            variant="outlined"
+            value={username}
+            onChange={(e) => setUsername(e.target.value)}
+          />
+          {/* Note: Removed component='label' from buttons unless you are uploading files */}
+          <Button variant='contained' onClick={handleLogin}>
+            Login
+          </Button>
+          <Button variant='contained' onClick={handleRegister}>
+            Register
+          </Button>
+        </AppBar>
+      )}
+      
+      {/* Work Space Container */}
+      <Box 
         sx={{ 
-          height: '64px', 
-          display: 'flex', 
-          flexDirection: 'row', 
-          alignItems: 'center', 
-          gap: 2, 
-          px: 2,
-          zIndex: (theme) => theme.zIndex.drawer + 1 
+          display: 'flex',
+          flexDirection: 'row',
+          flexGrow: 1,
+          height: '100%',
+          width: '100%',
+          overflow: 'hidden',
+          position: 'relative'
         }}
       >
-        <TextField
-          label="Username"
-          variant="outlined"
-          value={username}
-          onChange={(e) => setUsername(e.target.value)}
-        />
-        <Button variant='contained' component='label' onClick={handleLogin}>
-          Login
-        </Button>
-        <Button variant='contained' component='label' onClick={handleRegister}>
-          Register
-        </Button>
-      </AppBar>
-      <Box>
         <SideMenu anchorSide='left'>
           <Typography gutterBottom variant='h6' fontWeight={'bold'}>
               Cell Annotation Tool (CAT🐱)

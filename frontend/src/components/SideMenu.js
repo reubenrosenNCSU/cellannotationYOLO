@@ -33,8 +33,8 @@ export default function SideMenu({ children, anchorSide = "left" }) {
                         boxSizing: "border-box",
                         // Remove padding so it doesn't affect the scrollbar track
                         p: 0, 
-                        top: '64px', 
-                        height: 'calc(100vh - 64px)',
+                        top: 'auto', 
+                        height: '100%',
                         transform: open ? "none" : `translateX(${isLeft ? '-100%' : '100%'})`,
                         transition: (theme) => theme.transitions.create("transform", {
                             easing: theme.transitions.easing.sharp,
