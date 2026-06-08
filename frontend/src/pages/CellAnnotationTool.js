@@ -97,25 +97,6 @@ export default function CellAnnotationTool() {
   const [savedAnnotationCount, setSavedAnnotationCount] = useState(0)
 
   useEffect(() => {
-    async function initializeSession() {
-      try {
-        const res = await fetch(`${API_BASE_URL}/me`, {
-          method: 'GET',
-          credentials: 'include',
-        })
-        const data = await res.json();
-        if (res.ok) {
-          setUser(data.user)
-          setIsLoggedIn(data.logged_in)
-          console.log(data)
-        }
-      } catch (err) {
-        console.error("Session initialization failed", err)
-      } finally {
-        // Unlock the rest of the application
-        setIsAuthReady(true);
-      }
-    }
     initializeSession()
   }, [])
 
@@ -164,6 +145,26 @@ export default function CellAnnotationTool() {
   })
 
   // *----------* Helper Functions *----------* \\
+  async function initializeSession() {
+    try {
+      const res = await fetch(`${API_BASE_URL}/me`, {
+        method: 'GET',
+        credentials: 'include',
+      })
+      const data = await res.json();
+      if (res.ok) {
+        setUser(data.user)
+        setIsLoggedIn(data.logged_in)
+        console.log(data)
+      }
+    } catch (err) {
+      console.error("Session initialization failed", err)
+    } finally {
+      // Unlock the rest of the application
+      setIsAuthReady(true);
+    }
+  }
+  
   async function loadImages() {
     fetch(`${API_BASE_URL}/user-images`, { credentials: 'include' })
     .then(res => res.json())
@@ -211,8 +212,7 @@ export default function CellAnnotationTool() {
       if (!res.ok) throw new Error(data.error || 'Registration failed')
 
       console.log(data.message)
-      // Optional: Set your user state here if you track it
-      // setCurrentUser(username) 
+      initializeSession()
       
     } catch (err) {
       console.error('Registration failed:', err.message)
@@ -238,10 +238,9 @@ export default function CellAnnotationTool() {
 
       console.log(data.message)
       
-      // CRITICAL: Since the session switched to an existing user, 
-      // you will want to trigger a refresh of the current file list/batch 
-      // so the UI shows their old saved files instead of the temporary ones.
-      // fetchUserFiles() 
+      initializeSession()
+      loadImages()
+      loadModels()
       
     } catch (err) {
       console.error('Login failed:', err.message)
