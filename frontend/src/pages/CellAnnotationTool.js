@@ -558,7 +558,7 @@ export default function CellAnnotationTool() {
           credentials: 'include',
         })
 
-        if (!res.ok) throw new Error(`Save failed for model at index ${i}`);
+        if (!res.ok) throw new Error(`Save failed for model at index ${i}`)
         
         console.log(`Saved index ${i} successfully`)
       }
@@ -571,49 +571,35 @@ export default function CellAnnotationTool() {
   }
 
   async function exportAnnotations() { //TODO: Update
-    const filename = imageName
-    const imageWidth = imageSize.width
-    const imageHeight = imageSize.height
-    const yoloData = annotations_old.map(ann => {
-      // Convert to normalized center coordinates
-      const centerX = (ann.x + ann.w / 2) / imageWidth
-      const centerY = (ann.y + ann.h / 2) / imageHeight
-      const width = ann.w / imageWidth
-      const height = ann.h / imageHeight
-
-      return `${ann.class} ${centerX.toFixed(6)} ${centerY.toFixed(6)} ${width.toFixed(6)} ${height.toFixed(6)}`
-    }).join('\n')
+    setIsLoading(true)
 
     try {
       const res = await fetch(`${API_BASE_URL}/export-annotations`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          yolo_data: yoloData,
-          original_filename: filename,
-          annotations_only: annotationsOnly,
+          image_id: imageID,
         }),
+        credentials: 'include',
       })
-      if (!res.ok) {
-        const errorData = await res.json().catch(() => ({}))
-        throw new Error(errorData.error || `HTTP error! status: ${res.status}`)
-      }
+
+      if (!res.ok) throw new Error(`Annotation export failed`)
+
       const blob = await res.blob()
-      const downloadUrl = window.URL.createObjectURL(blob)
-      const link = document.createElement('a')
-      link.href = downloadUrl
-      const baseName = imageName.substring(0, imageName.lastIndexOf('.')) || imageName
-      link.setAttribute('download', annotationsOnly ? `${baseName}.txt` : `${imageName}_export.zip`)
-      document.body.appendChild(link)
-      link.click()
-      window.URL.revokeObjectURL(downloadUrl)
-      link.remove()
-    } catch (error) {
-      console.error('Export error:', error)
-      alert(`Export failed: ${error.message}`)
+      const url = window.URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = 'annotations.zip'
+      document.body.appendChild(a)
+      a.click()
+
+      document.body.removeChild(a)
+      window.URL.revokeObjectURL(url)
+      //const data = await res.json()
+    } catch(e) {
+      alert('Export failed: ' + (e.res?.data?.error || e.message))
+    } finally {
+      setIsLoading(false)
     }
   }
 
@@ -764,16 +750,16 @@ export default function CellAnnotationTool() {
 
       if (!res.ok) throw new Error(`${models_old[currentModel_old]} batch detection failed`)
       
-      const blob = await res.blob();
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = 'batch_results.zip';
-      document.body.appendChild(a);
-      a.click();
+      const blob = await res.blob()
+      const url = window.URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = 'batch_results.zip'
+      document.body.appendChild(a)
+      a.click()
 
-      document.body.removeChild(a);
-      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a)
+      window.URL.revokeObjectURL(url)
 
       setSelectedFiles([])
 

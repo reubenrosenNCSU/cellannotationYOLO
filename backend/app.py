@@ -541,36 +541,34 @@ def export_annotations():
         return jsonify({"error": "No active session"}), 401
 
     try:
-        # Get both CSV data and current image name from request
-        data = request.json
-        yolo_data = data['yolo_data']
-        original_filename = data['original_filename']
-        annotations_only = data.get('annotations_only', False)
-        base_name = os.path.splitext(original_filename)[0]
+        data = request.json or {}
+        image_id = data.get('image_id')
 
-        if annotations_only:
-            txt_buffer = io.BytesIO(yolo_data.encode('utf-8'))
-            txt_buffer.seek(0)
-            return send_file(
-                txt_buffer,
-                mimetype='text/plain',
-                as_attachment=True,
-                download_name=f'{base_name}.txt'
-            )
+        if not image_id:
+            return jsonify({"error": "Missing image_id"}), 400
 
-        user_upload_dir = os.path.join('users', g.user.id, 'uploads')
+        # Fetch the annotation record
+        annotation_records = db.session.query(Annotation).filter_by(
+            image_id=image_id, 
+            user_id=g.user.id
+        ).all()
 
-        # Get current TIFF path
-        tiff_path = os.path.join(user_upload_dir, original_filename)
-        if not os.path.exists(tiff_path):
-            return jsonify({'error': 'Current TIFF file not found'}), 404
+        if not annotation_records:
+            return jsonify({'error': 'No annotations found for this image'}), 404
 
-        # Create in-memory ZIP file
         zip_buffer = io.BytesIO()
+        files_added = 0
+
         with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zipf:
-            txt_filename = f"{base_name}.txt"
-            zipf.writestr(txt_filename, yolo_data)
-            zipf.write(tiff_path, os.path.basename(tiff_path))
+            for record in annotation_records:
+                if record.file_path and os.path.exists(record.file_path):
+                    # Get the raw filename (e.g., "annotation_v1.txt") to use inside the zip
+                    filename_in_zip = os.path.basename(record.file_path)
+                    zipf.write(record.file_path, filename_in_zip)
+                    files_added += 1
+
+        if files_added == 0:
+            return jsonify({'error': 'Annotation files were missing from server storage'}), 404
 
         zip_buffer.seek(0)
 
@@ -578,11 +576,11 @@ def export_annotations():
             zip_buffer,
             mimetype='application/zip',
             as_attachment=True,
-            download_name=f'{base_name}_export.zip'
+            download_name='annotations.zip'
         )
 
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        return jsonify({"error": str(e)}), 500
 
 @app.route('/upload-cropped', methods=['POST'])
 def upload_cropped_file():
