@@ -1131,8 +1131,8 @@ def detect_custom():
         annotations = detect_to_yolo(
             image_path=prep_data['path'],
             model_path=model_path,
-            image_width=orig_w,
-            image_height=orig_h,
+            image_width=prep_data['det_w'],
+            image_height=prep_data['det_h'],
             threshold=threshold
         )
 
