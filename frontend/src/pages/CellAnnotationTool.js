@@ -1,5 +1,5 @@
 import { useState, useEffect, Fragment } from 'react'
-import { Box, Button, Typography, Modal, Checkbox } from '@mui/material'
+import { Box, Button, Typography, Modal, Checkbox, Container, Paper, Select, FormControl, InputLabel, OutlinedInput, Chip } from '@mui/material'
 import PopupState, { bindTrigger, bindMenu } from 'material-ui-popup-state'
 import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown'
 import Menu from '@mui/material/Menu'
@@ -19,6 +19,7 @@ import AdjustableSlider from '../components/AdjustableSlider'
 import MetricsChart from '../components/MetricsChart'
 import CellCalibrator from '../components/CellCalibrator'
 import GalleryMenu from '../components/GalleryMenu'
+import RowMenu from '../components/RowMenu'
 
 export default function CellAnnotationTool() {
   // Base URL for the backend API
@@ -105,7 +106,6 @@ export default function CellAnnotationTool() {
 
     loadImages()
     loadModels()
-    setAnnotations(models.map(() => []))
   }, [isAuthReady])
 
   useEffect(() => {
@@ -190,6 +190,20 @@ export default function CellAnnotationTool() {
       const allLabels = data.map(item => item.label_set.labels)
       setClasses(allLabels)
       setCurrentClass(0)
+      setAnnotations(models.map(() => []))
+      const defaultLabels = data[0]?.label_set?.labels
+      ? data[0].label_set.labels.map(label => label.name) // Extracts ['neuron', 'glia']
+      : []
+      setDetectionSettings([
+        {
+          id: generateId(),
+          selectedModelId: data[0]?.id,
+          selectedClasses: defaultLabels,
+          rowThreshold: 0.5,
+          rowDiameter: 34
+        }
+      ])
+      console.log(detectionSettings)
     })
   }
 
@@ -687,9 +701,9 @@ export default function CellAnnotationTool() {
         },
         body: JSON.stringify({
           image_id: imageID,
-          model_id: models[currentModel].id,
-          threshold: threshold,
-          cell_diameter: cellDiameter
+          model_id: detectionSettings[0].selectedModelId,
+          threshold: detectionSettings[0].rowThreshold,
+          cell_diameter: detectionSettings[0].rowDiameter
         }),
         credentials: 'include',
       })
@@ -1243,6 +1257,15 @@ export default function CellAnnotationTool() {
     setTrainingMetricsModalOpen(false)
   }
 
+  // Detection settings modal state
+  const [detectionSettingsModalOpen, setDetectionSettingsModalOpen] = useState(false)
+  const handleOpenDetectionSettingsModal = () => {
+    setDetectionSettingsModalOpen(true)
+  }
+  const handleCloseDetectionSettingsModal = () => {
+    setDetectionSettingsModalOpen(false)
+  }
+
   // Calibrator
   const [calibratorOpen, setCalibratorOpen] = useState(false)
 
@@ -1272,6 +1295,54 @@ export default function CellAnnotationTool() {
     width: '100%',
     mb: 1
   }
+
+  // *----------* Row Menu Helpers *----------* \\
+
+  const generateId = () => {
+    if (typeof window !== 'undefined' && window.crypto && window.crypto.randomUUID) {
+      return window.crypto.randomUUID()
+    }
+    // Fallback string generator if crypto isn't available (e.g. non-HTTPS)
+    return Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
+  }
+
+  const createEmptyRow = () => {
+    const defaultModel = models[0]
+    return {
+      id: generateId(),
+      selectedModelId: defaultModel ? defaultModel.id : '',
+      selectedClasses: [],
+      rowThreshold: 0.5,
+      rowDiameter: 34,
+    }
+  }
+
+  const [detectionSettings, setDetectionSettings] = useState([createEmptyRow()])
+
+  const handleRowChange = (index, fieldName, value) => {
+    setDetectionSettings((prevRows) => {
+      const updatedRows = [...prevRows]
+      
+      // Special Case: If the model changes, reset the selected classes 
+      // because the old classes won't exist in the new model.
+      if (fieldName === 'selectedModelId') {
+        updatedRows[index] = {
+          ...updatedRows[index],
+          [fieldName]: value,
+          selectedClasses: [] 
+        }
+      } else {
+        updatedRows[index] = {
+          ...updatedRows[index],
+          [fieldName]: value,
+        }
+      }
+      return updatedRows
+    })
+  }
+
+  const handleAddRow = () => setDetectionSettings((prevRows) => [...prevRows, createEmptyRow()])
+  const handleDeleteRow = (indexToRemove) => setDetectionSettings((prevRows) => prevRows.filter((_, i) => i !== indexToRemove))
 
   const tabs = [
 		{
@@ -1488,129 +1559,130 @@ export default function CellAnnotationTool() {
 			label: 'Detect',
 			content: (
         <Box>
-          <Typography variant='body1' sx={{ pt: 1, fontWeight: 'bold' }}>
-            Select Model
-          </Typography>
-          <PopupState variant='popover' popupId='model-popup-menu'>
-            {(popupState) => (
-              <Fragment>
-                <Button variant='contained' {...bindTrigger(popupState)} endIcon={<KeyboardArrowDownIcon />} sx={{...button_style_span, mt: 1}}>
-                  {models_old[currentModel_old]}
-                </Button>
-                <Menu {...bindMenu(popupState)}>
-                  {models_old.map((item, index) => (
-                    <MenuItem 
-                      key={index}
-                      onClick={() => {setCurrentModel_old(index)}}
-                    >
-                        <Typography variant='body1'>{item}</Typography>
-                    </MenuItem>
-                  ))}
-                </Menu>
-              </Fragment>
-            )}
-          </PopupState>
-          <Button variant='contained' component='label' onClick={handleOpenCustomUploadModal} sx={{...button_style_span}}>
-            Load Custom
-          </Button>
           {/* <Typography gutterBottom variant='body2' sx={{ fontWeight: 'bold' }}>
             Selected Model: {customModelFilename}
           </Typography>
           <Typography gutterBottom variant='body2' sx={{ fontWeight: 'bold' }}>
             Model Type: {lastCustomModelType}
           </Typography> */}
-          <Modal
-            open={customUploadModalOpen}
-            onClose={cancelCustom}
-          >
-            <Box sx={{...modal_style}}>
-              <Typography>Load Custom Model</Typography>
-              <TextField
-                label="Model Name"
-                variant="outlined"
-                fullWidth
-                value={customModelName}
-                onChange={(e) => setCustomModelName(e.target.value)}
-              />
-              <Button variant='contained' component='label'>
-                Select File
-                <input hidden type='file' accept='.pt' onChange={handleChooseCustomModel} />
-              </Button>
-              <PopupState variant='popover' popupId='model-popup-menu'>
-                {(popupState) => (
-                  <Fragment>
-                    <Button variant='contained' {...bindTrigger(popupState)} endIcon={<KeyboardArrowDownIcon />}>
-                      {customModelType || 'Select Type'}
-                    </Button>
-                    <Menu {...bindMenu(popupState)}>
-                      {modelTypes.map((item, index) => (
-                        <MenuItem 
-                          key={index}
-                          onClick={() => {setCustomModelType(item)}}
-                        >
-                            <Typography variant='body1'>{item}</Typography>
-                        </MenuItem>
-                      ))}
-                    </Menu>
-                  </Fragment>
-                )}
-              </PopupState>
-              <Typography>Selected: {customModelFilename}</Typography>
-              <Button onClick={handleUploadCustomModel}>Confirm</Button>
-              <Button onClick={cancelCustom}>Cancel</Button>
-            </Box>
-          </Modal>
-          <Box sx={{pt: 1, borderTop: 1, borderColor: 'grey.500'}}>
+          <Box sx={{pt: 1}}>
             <Typography gutterBottom variant='body1' sx={{ fontWeight: 'bold' }}>
               Detection Settings
             </Typography>
-            <Tooltip>
-              Detected Average Cell Diameter: {detectedDiameter}
-            </Tooltip>
+            <Button variant='contained' component='label' onClick={handleOpenDetectionSettingsModal} sx={{...button_style_span}}>
+              Edit Settings
+            </Button>
+            <Modal
+              open={detectionSettingsModalOpen}
+              onClose={handleCloseDetectionSettingsModal}
+            >
+              <Box sx={{...modal_style, width: 800,}}>
+                <Typography variant="h5" gutterBottom>Detection Settings</Typography>
+                <Paper variant="outlined" sx={{ p: 3, mb: 4 }}>
+                  <RowMenu
+                    rows={detectionSettings}
+                    onAdd={handleAddRow}
+                    onDelete={handleDeleteRow}
+                    onChange={handleRowChange}
+                    headers={['Model', 'Classes', 'Threshold. (0-1)', 'Cell Diameter']}
+                    gridTemplateColumns={'2fr 2fr 1fr 1fr'}
+                    renderRowTemplate={(row, index, handleFieldChange) => {
+                      // Find the full model data matching this row's selected model ID
+                      const currentModelData = models.find(m => m.id === row.selectedModelId);
+                      // Safely grab available labels for this specific model, if it exists
+                      const availableLabels = currentModelData?.label_set?.labels || [];
+
+                      return (
+                        <Box display="grid" gridTemplateColumns="2fr 2fr 1fr 1fr" gap={2} width="100%">
+                          
+                          {/* 1. Single Select Dropdown (Model) */}
+                          <FormControl fullWidth size="small">
+                            <InputLabel>Model</InputLabel>
+                            <Select
+                              value={row.selectedModelId}
+                              label="Model"
+                              onChange={(e) => handleFieldChange('selectedModelId', e.target.value)}
+                            >
+                              {models.map((model) => (
+                                <MenuItem key={model.id} value={model.id}>
+                                  {model.name}
+                                </MenuItem>
+                              ))}
+                            </Select>
+                          </FormControl>
+
+                          {/* 2. Multi-Select Dropdown (Classes conditional on Model) */}
+                          <FormControl fullWidth size="small" disabled={!row.selectedModelId}>
+                            <InputLabel>Classes</InputLabel>
+                            <Select
+                              multiple
+                              value={row.selectedClasses}
+                              label="Classes"
+                              onChange={(e) => handleFieldChange('selectedClasses', e.target.value)}
+                              input={<OutlinedInput label="Classes" />}
+                              renderValue={(selected) => (
+                                <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
+                                  {selected.map((value) => {
+                                    const labelObj = availableLabels.find(l => l.name === value);
+                                    return (
+                                      <Chip 
+                                        key={value} 
+                                        label={value} 
+                                        size="small"
+                                        style={{ backgroundColor: labelObj?.color, color: '#fff', fontWeight: 'bold' }} 
+                                      />
+                                    );
+                                  })}
+                                </Box>
+                              )}
+                            >
+                              {availableLabels.map((label) => (
+                                <MenuItem key={label.name} value={label.name}>
+                                  {label.name}
+                                </MenuItem>
+                              ))}
+                            </Select>
+                          </FormControl>
+
+                          {/* 3. Decimal Input (0 to 1) */}
+                          <TextField
+                            label="Threshold (0-1)"
+                            type="number"
+                            size="small"
+                            inputProps={{ step: "0.1", min: "0", max: "1" }}
+                            value={row.rowThreshold}
+                            onChange={(e) => {
+                              let val = parseFloat(e.target.value);
+                              if (val > 1) val = 1;
+                              if (val < 0) val = 0;
+                              handleFieldChange('decimalValue', isNaN(val) ? '' : val);
+                            }}
+                          />
+
+                          {/* 4. Integer Input (Default 34) */}
+                          <TextField
+                            label="Cell Diameter"
+                            type="number"
+                            size="small"
+                            inputProps={{ step: "1" }}
+                            value={row.rowDiameter}
+                            onChange={(e) => {
+                              const val = parseInt(e.target.value, 10);
+                              handleFieldChange('integerValue', isNaN(val) ? '' : val);
+                            }}
+                          />
+
+                        </Box>
+                      )
+                    }}
+                  />
+                </Paper>
+              </Box>
+            </Modal>
+            
             <Button variant='contained' component='label' onClick={() => setCalibratorOpen(true)} sx={{...button_style_span}}>
               Calibrate Cell Size
             </Button>
-            <Box display='flex' flexDirection='row'>
-              <Box sx={{width: '50%', display: 'flex', flexDirection: 'column', mr: 1}}>
-                <TextField
-                  value={threshold}
-                  onChange={(e) => setThreshold(Number(e.target.value))}
-                  type='number'
-                  variant='outlined'
-                  size='small'
-                  slotProps={{ 
-                    htmlInput: {
-                      step: 0.1,
-                      min: 0,
-                      max: 1
-                    }
-                  }}
-                  sx={{...button_style_span, mt: 'auto', mb: 0}}
-                />
-                <Typography gutterBottom variant='body2' sx={{ fontWeight: 'bold' }}>
-                  Threshold <br /> (0-1)
-                </Typography>
-              </Box>
-              <Box  sx={{width: '50%', display: 'flex', flexDirection: 'column', ml: 1}}>
-                <TextField
-                  value={cellDiameter}
-                  onChange={(e) => setCellDiameter(Number(e.target.value))}
-                  type='number'
-                  variant='outlined'
-                  size='small'
-                  slotProps={{ 
-                    htmlInput: {
-                      step: 1,
-                      min: 0
-                    },
-                  }}
-                  sx={{...button_style_span, mt: 'auto', mb: 0}}
-                />
-                <Typography gutterBottom variant='body2' sx={{ fontWeight: 'bold' }}>
-                  Average Cell Diameter
-                </Typography>
-              </Box>
-            </Box>
           </Box>
           <Button variant='contained' component='label' onClick={detect} sx={{...button_style_span}}>
             Single Detect
@@ -1889,6 +1961,10 @@ export default function CellAnnotationTool() {
               setMax={setCMax}
             />
           </Stack>
+          
+          <Typography variant='body1' sx={{ pt: 1, fontWeight: 'bold' }}>
+            Select Model
+          </Typography>
           <PopupState variant='popover' popupId='model-popup-menu'>
             {(popupState) => (
               <Fragment>
@@ -1911,6 +1987,51 @@ export default function CellAnnotationTool() {
               </Fragment>
             )}
           </PopupState>
+          
+          <Button variant='contained' component='label' onClick={handleOpenCustomUploadModal} sx={{...button_style_span}}>
+            Load Custom
+          </Button>
+          <Modal
+            open={customUploadModalOpen}
+            onClose={cancelCustom}
+          >
+            <Box sx={{...modal_style}}>
+              <Typography>Load Custom Model</Typography>
+              <TextField
+                label="Model Name"
+                variant="outlined"
+                fullWidth
+                value={customModelName}
+                onChange={(e) => setCustomModelName(e.target.value)}
+              />
+              <Button variant='contained' component='label'>
+                Select File
+                <input hidden type='file' accept='.pt' onChange={handleChooseCustomModel} />
+              </Button>
+              <PopupState variant='popover' popupId='model-popup-menu'>
+                {(popupState) => (
+                  <Fragment>
+                    <Button variant='contained' {...bindTrigger(popupState)} endIcon={<KeyboardArrowDownIcon />}>
+                      {customModelType || 'Select Type'}
+                    </Button>
+                    <Menu {...bindMenu(popupState)}>
+                      {modelTypes.map((item, index) => (
+                        <MenuItem 
+                          key={index}
+                          onClick={() => {setCustomModelType(item)}}
+                        >
+                            <Typography variant='body1'>{item}</Typography>
+                        </MenuItem>
+                      ))}
+                    </Menu>
+                  </Fragment>
+                )}
+              </PopupState>
+              <Typography>Selected: {customModelFilename}</Typography>
+              <Button onClick={handleUploadCustomModel}>Confirm</Button>
+              <Button onClick={cancelCustom}>Cancel</Button>
+            </Box>
+          </Modal>
           
           <TabMenu items={tabs}></TabMenu>
         </SideMenu>
