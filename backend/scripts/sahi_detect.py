@@ -33,7 +33,7 @@ def get_model(model_path: str, threshold: float, device: str = "cuda:0") -> Auto
 
 
 def run_detection(
-    image_path: str,
+    image_source: str,
     model_path: str,
     threshold: float = 0.5,
     slice_size: int = 640,
@@ -54,8 +54,11 @@ def run_detection(
     Returns:
         List of sahi ObjectPrediction objects.
     """
-    with Image.open(image_path) as img:
-        img_w, img_h = img.size
+    if isinstance(image_source, Image.Image):
+        img_w, img_h = image_source.size
+    else:
+        with Image.open(image_source) as img:
+            img_w, img_h = img.size
 
     stride = int(slice_size * (1 - overlap))
     tiles_x = math.ceil(img_w / stride)
@@ -71,7 +74,7 @@ def run_detection(
     t0 = time.time()
 
     result = get_sliced_prediction(
-        image=image_path,
+        image=image_source,
         detection_model=model,
         slice_height=slice_size,
         slice_width=slice_size,
