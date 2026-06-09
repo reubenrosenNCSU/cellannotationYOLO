@@ -693,36 +693,41 @@ export default function CellAnnotationTool() {
     }
 
     setIsLoading(true)
-    try {
-      const res = await fetch(`${API_BASE_URL}/detect`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          image_id: imageID,
-          model_id: detectionSettings[0].selectedModelId,
-          threshold: detectionSettings[0].rowThreshold,
-          cell_diameter: detectionSettings[0].rowDiameter
-        }),
-        credentials: 'include',
-      })
 
-      if (!res.ok) throw new Error(`${models[currentModel].name} detection failed`)
-      const data = await res.json()
-      
-      const newAnnotations = data.annotations
+    for (const row of detectionSettings) {
+      const payload = {
+        image_id: imageID,
+        model_id: row.selectedModelId,
+        threshold: row.rowThreshold,
+        cell_diameter: row.rowDiameter
+      }
 
-      // Directly assign the structured array to the current model's index in the 2D state array
-      setAnnotations((prevAnnotations) => {
-        const updated = [...prevAnnotations]
-        updated[currentModel] = newAnnotations
-        return updated
-      })
-    } catch (e) {
-      alert('Detection failed: ' + (e.response?.data?.error || e.message))
-    } finally {
-      setIsLoading(false)
+      try {
+        const res = await fetch(`${API_BASE_URL}/detect`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify(payload),
+          credentials: 'include',
+        })
+
+        if (!res.ok) throw new Error(`${models[currentModel].name} detection failed`)
+        const data = await res.json()
+        
+        const newAnnotations = data.annotations
+        console.log(newAnnotations)
+        // Directly assign the structured array to the current model's index in the 2D state array
+        setAnnotations((prevAnnotations) => {
+          const updated = [...prevAnnotations]
+          updated[currentModel] = newAnnotations
+          return updated
+        })
+      } catch (e) {
+        alert('Detection failed: ' + (e.response?.data?.error || e.message))
+      } finally {
+        setIsLoading(false)
+      }
     }
   }
 
