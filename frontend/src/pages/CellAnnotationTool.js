@@ -171,23 +171,23 @@ export default function CellAnnotationTool() {
     setSelectedFiles(prev => [...prev, ...newFiles])
     e.target.value = ''
 
-    for (const file of newFiles) {
-      const formData = new FormData()
-      formData.append('file', file)
-      try {
-        const res = await fetch(`${API_BASE_URL}/preview-tiff`, {
-          method: 'POST',
-          body: formData,
-          credentials: 'include',
-        })
-        if (!res.ok) throw new Error('Preview failed')
-        const blob = await res.blob()
-        const url = URL.createObjectURL(blob)
-        setBatchThumbnails(prev => ({ ...prev, [fileKey(file)]: url }))
-      } catch (err) {
-        console.error(`Failed to generate preview for ${file.name}:`, err)
-      }
-    }
+    // for (const file of newFiles) {
+    //   const formData = new FormData()
+    //   formData.append('file', file)
+    //   try {
+    //     const res = await fetch(`${API_BASE_URL}/preview-tiff`, {
+    //       method: 'POST',
+    //       body: formData,
+    //       credentials: 'include',
+    //     })
+    //     if (!res.ok) throw new Error('Preview failed')
+    //     const blob = await res.blob()
+    //     const url = URL.createObjectURL(blob)
+    //     setBatchThumbnails(prev => ({ ...prev, [fileKey(file)]: url }))
+    //   } catch (err) {
+    //     console.error(`Failed to generate preview for ${file.name}:`, err)
+    //   }
+    // }
   }
 
   function handleSave() {
