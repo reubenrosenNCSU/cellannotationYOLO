@@ -1131,8 +1131,8 @@ def detect_custom():
         annotations = detect_to_yolo(
             image_path=prep_data['path'],
             model_path=model_path,
-            image_width=orig_w,
-            image_height=orig_h,
+            image_width=prep_data['det_w'],
+            image_height=prep_data['det_h'],
             threshold=threshold
         )
 
@@ -1378,11 +1378,11 @@ def batch_detect():
                 txt_path = res.get('txt_path')
 
                 # defensive existence checks
-                if tiff_path and os.path.exists(tiff_path):
-                    zf.write(tiff_path, os.path.basename(tiff_path))
-                else:
-                    # include a small note if the TIFF is missing
-                    zf.writestr(os.path.splitext(orig)[0] + '_MISSING_TIFF.txt', f"Missing TIFF for {orig}")
+                # if tiff_path and os.path.exists(tiff_path):
+                #     zf.write(tiff_path, os.path.basename(tiff_path))
+                # else:
+                #     # include a small note if the TIFF is missing
+                #     zf.writestr(os.path.splitext(orig)[0] + '_MISSING_TIFF.txt', f"Missing TIFF for {orig}")
 
                 if txt_path and os.path.exists(txt_path):
                     zf.write(txt_path, os.path.basename(txt_path))
