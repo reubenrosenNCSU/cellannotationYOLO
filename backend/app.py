@@ -703,10 +703,16 @@ def load_annotations():
 
     results = []
     for ann in annotations:
+        annotation_weights = Weights.query.filter_by(
+            id=ann.weights_id, 
+            user_id=g.user.id 
+        ).first()
         results.append({
+            "id": ann.id,
             "weights_id": ann.weights_id,
             "annotations": ann.annotations,  # SQLAlchemy parses JSON columns automatically
-            "count": ann.count
+            "count": ann.count,
+            "labels": annotation_weights.label_set.to_dict()
         })
 
     return jsonify({"annotations": results}), 200
@@ -810,14 +816,18 @@ def detect():
         )
 
         existing_annotation = Annotation.query.filter_by(
-            image_id=image_id, 
+            image_id=image_id,
             weights_id=model_id, 
-            user_id=g.user.id
+            user_id=g.user.id ,
+            threshold=threshold,
+            cell_diameter=cell_diameter
         ).first()
+        
 
         if existing_annotation:
             full_path = existing_annotation.file_path
             target_record = existing_annotation
+            annotation_id = existing_annotation.id
         else:
             unique_id = str(uuid.uuid4())
             annotation_dir = g.user.get_path('annotations')
@@ -828,9 +838,12 @@ def detect():
                 user_id=g.user.id,
                 file_path=full_path,
                 image_id=image_id,
-                weights_id=model_id
+                weights_id=model_id,
+                threshold=threshold,
+                cell_diameter=cell_diameter
             )
             db.session.add(target_record)
+            annotation_id=unique_id
 
 
         yolo_lines = []
@@ -881,9 +894,16 @@ def detect():
         
         db.session.commit()
 
+        annotation_weights = Weights.query.filter_by(
+            id=model_id, 
+            user_id=g.user.id 
+        ).first()
+
         # Structuring Response Data Payload
         return jsonify({
-            "annotations": converted_annotations
+            "annotations": converted_annotations,
+            "annotation_id": annotation_id,
+            "labels": annotation_weights.label_set.to_dict()
         })
 
     except Exception as e:

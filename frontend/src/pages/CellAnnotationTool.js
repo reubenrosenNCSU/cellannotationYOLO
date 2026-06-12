@@ -51,6 +51,7 @@ export default function CellAnnotationTool() {
   // State for annotations
   const [annotations_old, setAnnotations_old] = useState([])
   const [annotations, setAnnotations] = useState([])
+  const [boxes, setBoxes] = useState([])
   const [classes, setClasses] = useState([])
   const [colors, setColors] = useState([])
   const [currentClass, setCurrentClass] = useState(0)
@@ -155,7 +156,6 @@ export default function CellAnnotationTool() {
       if (res.ok) {
         setUser(data.user)
         setIsLoggedIn(data.logged_in)
-        console.log(data)
       }
     } catch (err) {
       console.error("Session initialization failed", err)
@@ -176,7 +176,6 @@ export default function CellAnnotationTool() {
       }));
 
       setImageList(formattedData)
-      console.log(formattedData)
     })
   }
 
@@ -186,11 +185,10 @@ export default function CellAnnotationTool() {
     .then(data => {
       setModels(data)
       setCurrentModel(0)
-      console.log(data)
       const allLabels = data.map(item => item.label_set.labels)
       setClasses(allLabels)
       setCurrentClass(0)
-      setAnnotations(models.map(() => []))
+      setAnnotations([])
       const defaultLabels = data[0]?.label_set?.labels
       ? data[0].label_set.labels.map(label => label.name) // Extracts ['neuron', 'glia']
       : []
@@ -203,7 +201,6 @@ export default function CellAnnotationTool() {
           rowDiameter: 34
         }
       ])
-      console.log(detectionSettings)
     })
   }
 
@@ -225,7 +222,6 @@ export default function CellAnnotationTool() {
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || 'Registration failed')
 
-      console.log(data.message)
       initializeSession()
       
     } catch (err) {
@@ -249,8 +245,6 @@ export default function CellAnnotationTool() {
 
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || 'Login failed')
-
-      console.log(data.message)
       
       initializeSession()
       loadImages()
@@ -294,7 +288,7 @@ export default function CellAnnotationTool() {
         setImageID(data.image_id)
         setImageURL(`${API_BASE_URL}${data.converted_url}`)
         setImageSize({width: data.dimensions[0], height: data.dimensions[1]})
-        setAnnotations(models.map(() => []))
+        setAnnotations([])
     } catch(e) {
       alert('Upload failed: ' + (e.response?.data?.error || e.message))
     } finally {
@@ -385,11 +379,12 @@ export default function CellAnnotationTool() {
         if (!res.ok) throw new Error('Crop failed')
         const data = await res.json()
 
-        setAnnotations((prevAnnotations) => {
+        const newAnnotations = (prevAnnotations) => {
           // Map over each model's sub-array of annotations
-          return prevAnnotations.map((modelAnnos) => {
-            return modelAnnos.filter((anno) => {
+          return prevAnnotations.map((modelObj) => {
+            const innerBoxes = modelObj.annotations || []
               // A box is "inside" if its boundaries are within the crop box boundaries
+            const filteredBoxes = innerBoxes.filter((anno) => {
               const isInside =
                 anno.x >= box.x &&
                 anno.y >= box.y &&
@@ -398,8 +393,29 @@ export default function CellAnnotationTool() {
 
               return isInside
             })
+            return {
+              ...modelObj,
+              annotations: filteredBoxes
+            }
           })
-        })
+        }
+
+        console.log(newAnnotations)
+        setAnnotations(newAnnotations)
+
+        const newBoxes = (prevBoxes) => {
+          return prevBoxes.filter((anno) => {
+            const isInside =
+              anno.x >= box.x &&
+              anno.y >= box.y &&
+              (anno.x + anno.w) <= (box.x + box.w) &&
+              (anno.y + anno.h) <= (box.y + box.h)
+
+            return isInside
+          })
+        }
+        console.log(newBoxes)
+        setBoxes(newBoxes)
 
         // Add a timestamp as a query parameter (?t=123456789)
         setImageURL(`${API_BASE_URL}${data.converted_url}?t=${new Date().getTime()}`)
@@ -413,7 +429,6 @@ export default function CellAnnotationTool() {
 
   // Handler for clicking a specific image
   async function handleLoadImage(image)  {
-    console.log("Selected Image ID:", image.id)
     setImageURL(image.url)
     setImageID(image.id)
     setImageName(image.name)
@@ -432,17 +447,24 @@ export default function CellAnnotationTool() {
       if (!res.ok) throw new Error('Load failed')
       const data = await res.json()
       console.log(data)
-      const organizedAnnotations = models.map(() => [])
-      
-      data.annotations.forEach((item) => {
-        const modelIndex = models.findIndex(m => m.id === item.weights_id)
-        
-        if (modelIndex !== -1) {
-          organizedAnnotations[modelIndex] = item.annotations
-        }
+      setAnnotations(data.annotations)
 
-        setAnnotations(organizedAnnotations)
+      const annoList = data.annotations || []
+      const boxList = annoList.flatMap((modelObj) => {
+        const annotationId = modelObj.id
+        const labels = modelObj.labels.labels
+        const innerList = modelObj.annotations || []
+        
+        return innerList.map((box) => ({
+          ...box,
+          annotation_id: annotationId,
+          name: labels[box.class].name,
+          color: labels[box.class].color
+        }))
       })
+
+      setBoxes(boxList)
+
     } catch (e) {
       console.error('Annotation load failed:', e.message)
     }
@@ -464,7 +486,6 @@ export default function CellAnnotationTool() {
           credentials: 'include'
       })
       if (!res.ok) throw new Error('Delete failed')
-      console.log(res)
       if (image_id = imageID) {
         setImageID('')
         setImageName('')
@@ -506,16 +527,29 @@ export default function CellAnnotationTool() {
     }
   }
 
-  const handleRemoveBox = (box) => {
-    setAnnotations(prev => {
-        const tempAnnotations = [...prev]
-        tempAnnotations[currentModel] = tempAnnotations[currentModel].filter(
-          b => b !== box
-        )
-        return tempAnnotations
+  const handleRemoveBox = (targetBox) => {
+    setAnnotations((prevAnnotations) => {
+      return prevAnnotations.map((modelObj) => {
+        const modelId = modelObj.id || modelObj.annotation_id
+        
+        if (modelId === targetBox.annotation_id) {
+          const innerBoxes = modelObj.annotations || [];
+          return {
+            ...modelObj,
+            annotations: innerBoxes.filter(
+              (b) => !(b.x === targetBox.x && b.y === targetBox.y && b.w === targetBox.w && b.h === targetBox.h)
+            )
+          };
+        }
+        return modelObj
       })
-    setUndoStack(prev => prev.slice(0, -1))
-    //detectCellDiameter()
+    })
+
+    setBoxes((prevBoxes) => {
+      return prevBoxes.filter((b) => b !== targetBox)
+    })
+
+    setUndoStack((prev) => prev.slice(0, -1))
   }
 
   async function handleColorUpdate(index, newColor) {
@@ -619,7 +653,6 @@ export default function CellAnnotationTool() {
   function importAnnotations(e) {
     const file = e.target.files[0]
     e.target.value = null
-    console.log(file)
     if (!file) return
 
     if (!file.name.toLowerCase().endsWith('.txt')) {
@@ -680,7 +713,6 @@ export default function CellAnnotationTool() {
     })
 
     const avgDiameter = Math.round(total / annotations_old.length)
-    console.log(annotations_old.length)
     setDetectedDiameter(avgDiameter)
   }
 
@@ -716,12 +748,27 @@ export default function CellAnnotationTool() {
         const data = await res.json()
         
         const newAnnotations = data.annotations
-        console.log(newAnnotations)
-        // Directly assign the structured array to the current model's index in the 2D state array
+        console.log(data)
+        const targetId = data.annotation_id
+        const newBoxes = newAnnotations.map(box => ({
+          ...box,
+          annotation_id: targetId,
+          name: data.labels.labels[box.class].name,
+          color: data.labels.labels[box.class].color
+        }))
         setAnnotations((prevAnnotations) => {
-          const updated = [...prevAnnotations]
-          updated[currentModel] = newAnnotations
-          return updated
+          return prevAnnotations.map((modelObj) => {
+            if (modelObj.annotation_id === targetId) {
+              return {
+                ...modelObj,
+                annotations: newAnnotations
+              }
+            }
+          })
+        })
+        setBoxes((prevBoxes) => {
+          const filteredBoxes = prevBoxes.filter(box => box.annotation_id != targetId)
+          return [...filteredBoxes, ...newBoxes]
         })
       } catch (e) {
         alert('Detection failed: ' + (e.response?.data?.error || e.message))
@@ -958,7 +1005,6 @@ export default function CellAnnotationTool() {
         count: data.annotation_count
       }
       setTrainingData((prevData) => [...prevData, newEntry])
-      console.log(trainingData)
       alert('Training data saved!')
     } catch (error) {
       console.error('Save failed:', error)
@@ -998,8 +1044,6 @@ export default function CellAnnotationTool() {
         throw new Error(errorData.error || `HTTP error! status: ${res.status}`)
       }
       const resJson = await res.json()
-      console.log(resJson.kfold_results)
-      console.log(resJson.model_url)
       setKFoldResults(resJson.kfold_results)
       setFineTuneModelURL(resJson.model_url)
       alert('Model fine tuned with saved data.')
@@ -1096,7 +1140,6 @@ export default function CellAnnotationTool() {
         const { width, height } = dimensions
 
           const lines = yoloText.trim().split('\n')
-          console.log(lines)
           const parsedAnnotations = lines.filter(line => line.trim()).map(line => {
               const [classId, x_norm, y_norm, w_norm, h_norm] = line.split(' ').map(Number)
               
@@ -1134,7 +1177,6 @@ export default function CellAnnotationTool() {
       // 1. Prepare the URL
       // If fineTuneModelURL is "/snapshots/my_model.pt", this prepends the backend host
       const downloadUrl = `${API_BASE_URL}${fineTuneModelURL}`
-      console.log(downloadUrl)
       const res = await fetch(downloadUrl, {
         method: 'GET',
         credentials: 'include',
@@ -1215,7 +1257,6 @@ export default function CellAnnotationTool() {
         throw new Error(errorData.error || `HTTP error! status: ${res.status}`)
       }
       const resJson = await res.json()
-      console.log(resJson)
       setMetricsData(resJson)
     } catch (error) {
       console.error(error)
@@ -2057,7 +2098,7 @@ export default function CellAnnotationTool() {
             </Typography>
           </Box>
           <Box sx={{ flexGrow: 1, display: 'flex', justifyContent: 'center', bgcolor: '#111' }}>
-            <ImageCanvas src={imageURL} boxes={annotations} onAddBox={handleAddBox}
+            <ImageCanvas src={imageURL} boxes={boxes} onAddBox={handleAddBox}
               onRemoveBox={handleRemoveBox} isCropping={isCropping} onCrop={handleCrop}
               currentClass={currentClass} classes={classes} imageSize={imageSize}
               brightness={brightness} contrast={contrast}

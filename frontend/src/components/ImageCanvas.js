@@ -173,27 +173,25 @@ export default function ImageCanvas({ src, boxes, onAddBox, onRemoveBox, isCropp
 
     const fontSize = 11 / scale
     ctx.font = `${fontSize}px sans-serif`
-    boxes.forEach((set, index) => {
-      set.forEach((b) => {
-        const color = classes[index][b.class].color
-        ctx.strokeStyle = color
-        ctx.strokeRect(b.x, b.y, b.w, b.h)
+    boxes.forEach((box) => {
+      const color = box.color
+      ctx.strokeStyle = color
+      ctx.strokeRect(box.x, box.y, box.w, box.h)
 
-        if (showLabels) {
-          const label = b.confidence != null
-            ? `${classes[index][b.class].name} ${(b.confidence * 100).toFixed(0)}%`
-            : classes[index][b.class].name
-          const padding = 2 / scale
-          const textWidth = ctx.measureText(label).width
-          const labelH = fontSize + padding * 2
-          const labelY = b.y - labelH > 0 ? b.y - labelH : b.y
+      if (showLabels) {
+        const label = box.confidence != null
+          ? `${box.name} ${(box.confidence * 100).toFixed(0)}%`
+          : box.name
+        const padding = 2 / scale
+        const textWidth = ctx.measureText(label).width
+        const labelH = fontSize + padding * 2
+        const labelY = box.y - labelH > 0 ? box.y - labelH : box.y
 
-          ctx.fillStyle = color
-          ctx.fillRect(b.x, labelY, textWidth + padding * 2, labelH)
-          ctx.fillStyle = getLabelTextColor(color)
-          ctx.fillText(label, b.x + padding, labelY + fontSize)
-        }
-      })
+        ctx.fillStyle = color
+        ctx.fillRect(box.x, labelY, textWidth + padding * 2, labelH)
+        ctx.fillStyle = getLabelTextColor(color)
+        ctx.fillText(label, box.x + padding, labelY + fontSize)
+      }
     })
 
     // draw box while dragging

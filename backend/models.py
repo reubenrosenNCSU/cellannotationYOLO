@@ -115,6 +115,8 @@ class Annotation(db.Model):
     
     annotations = db.Column(db.JSON, nullable=False)
     count = db.Column(db.Integer, default=0)
+    threshold = db.Column(db.Float)
+    cell_diameter = db.Column(db.Integer)
 
 
 
