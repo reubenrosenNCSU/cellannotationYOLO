@@ -877,7 +877,8 @@ def detect():
                 "w": pixel_w,
                 "h": pixel_h,
                 "class": cls,
-                "confidence": conf
+                "confidence": conf,
+                "is_detected": True
             })
 
         # 6. Save/Override the physical standard YOLO txt file asset
@@ -903,7 +904,8 @@ def detect():
         return jsonify({
             "annotations": converted_annotations,
             "annotation_id": annotation_id,
-            "labels": annotation_weights.label_set.to_dict()
+            "labels": annotation_weights.label_set.to_dict(),
+            "is_detected": True
         })
 
     except Exception as e:

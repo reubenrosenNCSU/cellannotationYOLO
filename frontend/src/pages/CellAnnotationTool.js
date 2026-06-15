@@ -452,14 +452,16 @@ export default function CellAnnotationTool() {
       const annoList = data.annotations || []
       const boxList = annoList.flatMap((modelObj) => {
         const annotationId = modelObj.id
+        const isDetected = modelObj.is_detected
         const labels = modelObj.labels.labels
         const innerList = modelObj.annotations || []
         
         return innerList.map((box) => ({
           ...box,
           annotation_id: annotationId,
+          is_detected: isDetected,
           name: labels[box.class].name,
-          color: labels[box.class].color
+          color: labels[box.class].color,
         }))
       })
 

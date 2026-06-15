@@ -117,6 +117,7 @@ class Annotation(db.Model):
     count = db.Column(db.Integer, default=0)
     threshold = db.Column(db.Float)
     cell_diameter = db.Column(db.Integer)
+    is_detected = db.Column(db.Boolean)
 
 
 
