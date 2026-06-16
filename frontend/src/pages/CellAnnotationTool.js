@@ -1318,6 +1318,8 @@ export default function CellAnnotationTool() {
   const [calibratorOpen, setCalibratorOpen] = useState(false)
 
   const [galleryMenuOpen, setGalleryMenuOpen] = useState(false)
+
+  const [annotationModalOpen, setAnnotationModalOpen] = useState(false)
   // const [images] = useState([
   //   { url: 'https://picsum.photos/200/300?random=1', id: 1 },
   //   { url: 'https://picsum.photos/200/300?random=2', id: 2 },
@@ -1460,9 +1462,19 @@ export default function CellAnnotationTool() {
               Import Annotations
               <input hidden type='file' accept='txt' onChange={importAnnotations}/>
             </Button>
-            <Button variant='contained' component='label' onClick={clearAnnotations} sx={{...button_style_span, bgcolor: 'error.dark', '&:hover': { bgcolor: 'error.light' }}}>
+            <Button variant='contained' component='label' onClick={() => setAnnotationModalOpen(true)} sx={{...button_style_span, bgcolor: 'error.dark', '&:hover': { bgcolor: 'error.light' }}}>
               Clear Annotations
             </Button>
+            <SideMenu 
+              anchorSide='left'
+              open={annotationModalOpen} 
+              onClose={() => setAnnotationModalOpen(false)}
+            >
+              <p></p>
+              <Button onClick={() => setAnnotationModalOpen(false)}>
+                Close!
+              </Button>
+            </SideMenu>
             <Box sx={{ display: 'flex', alignItems: 'center', mb: 0.5 }}>
               <Checkbox
                 checked={showLabels}

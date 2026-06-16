@@ -768,6 +768,62 @@ def delete_image():
         return jsonify({"error": "Internal server error occurred during deletion structural sweep"}), 500
 
 
+@app.route('/clear-annotations', methods=['DELETE'])
+def clear_annotations():
+    if not g.user:
+        return jsonify({"error": "No active session"}), 401
+    
+    data = request.get_json()
+    if not data or 'image_id' not in data or 'annotation_ids' not in data:
+        return jsonify({"error": "Missing image_id or annotation_ids in request body"}), 400
+
+
+    image_id = data['image_id']
+    clear_all = data['annotation_ids']
+
+    if not isinstance(annotation_ids, list):
+        return jsonify({"error": "annotation_ids must be a list"}), 400
+    
+    try:
+        # Filter the target annotations belonging *only* to this image and matching the requested IDs
+        target_annotations = Annotation.query.join(ImageRecord).filter(
+            Annotation.id.in_(annotation_ids),
+            Annotation.image_id == image_id,
+            ImageRecord.user_id == g.user.id
+        ).all()
+        
+        if not target_annotations:
+            return jsonify({"error": "No matching annotations found for this image"}), 404
+
+        # Track file paths before removing from the DB
+        annotation_paths = [ann.file_path for ann in annotations_to_delete]
+        
+        # Update database
+        for ann in target_annotations:
+            db.session.delete(ann)
+        db.session.commit()
+
+        # Execute disk cleanup
+        deleted_count = 0
+        for ann_path in annotation_paths:
+            # Resolving path context relative to 'data' directory if your system requires it
+            # e.g., actual_path = os.path.join('data', ann_path) if not saved as absolute
+            if os.path.exists(ann_path):
+                os.remove(ann_path)
+                deleted_count += 1
+        
+        return jsonify({
+            "success": True, 
+            "message": f"Successfully deleted {len(target_annotations)} database records and {deleted_count} files"
+        }), 200
+        
+    except Exception as e:
+        db.session.rollback()
+        print(f"CRITICAL: Failed to execute clear routine for annotations on image {image_id}: {e}")
+        return jsonify({"error": "Internal server error occurred during annotation sweep"}), 500
+
+
+
 # *----------* Model Endpoints *----------* #
 
 @app.route('/detect', methods=['POST'])
