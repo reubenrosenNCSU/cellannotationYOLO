@@ -1,5 +1,5 @@
 import { useState, useEffect, Fragment } from 'react'
-import { Box, Button, Typography, Modal, Checkbox } from '@mui/material'
+import { Box, Button, Typography, Modal, Checkbox, Paper, Select, FormControl, InputLabel, OutlinedInput, Chip } from '@mui/material'
 import PopupState, { bindTrigger, bindMenu } from 'material-ui-popup-state'
 import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown'
 import Menu from '@mui/material/Menu'
@@ -17,10 +17,11 @@ import ColorMenu from '../components/ColorMenu'
 import AdjustableSlider from '../components/AdjustableSlider'
 import MetricsChart from '../components/MetricsChart'
 import CellCalibrator from '../components/CellCalibrator'
+import RowMenu from '../components/RowMenu'
 
 export default function CellAnnotationTool() {
   // Base URL for the backend API
-  const API_BASE_URL = 'http://10.80.24.12:5001'
+  const API_BASE_URL = 'http://10.80.24.12:5002'
 
   const [isLoading, setIsLoading] = useState(false)
 
@@ -431,147 +432,153 @@ export default function CellAnnotationTool() {
   // *----------* Detection Operations *----------* \\
 
   async function detect() {
-    const formData = new FormData()
+    setIsLoading(true)
 
-    let endpoint = ''
-    let payload = null
-    let headers = {}
+    for (const row of detectionSettings) {
+      const formData = new FormData()
+      let endpoint = ''
+      let payload = null
+      let headers = {}
 
-    if (currentModel === 0) {
-      endpoint = `${API_BASE_URL}/detect-sgn`
-    } else if (currentModel === 1) {
-      endpoint = `${API_BASE_URL}/detect-cd3`
-    } else if (currentModel === 2) {
-      endpoint = `${API_BASE_URL}/detect-madm`
-    } else if (currentModel === 3) {
-      if (!customModel) {
-        alert('Please upload a custom model (.pt)')
+      if (currentModel === 0) {
+        endpoint = `${API_BASE_URL}/detect-sgn`
+      } else if (currentModel === 1) {
+        endpoint = `${API_BASE_URL}/detect-cd3`
+      } else if (currentModel === 2) {
+        endpoint = `${API_BASE_URL}/detect-madm`
+      } else if (currentModel === 3) {
+        if (!customModel) {
+          alert('Please upload a custom model (.pt)')
+          setIsLoading(false)
+          return
+        }
+        endpoint = `${API_BASE_URL}/detect-custom`
+        formData.append('pt_file', customModel)
+        formData.append('model_type', customModelType)
+        formData.append('threshold', row.rowThreshold)
+        formData.append('cell_diameter', row.rowDiameter)
+
+        payload = formData
+      } else {
+        console.log('Invalid Model Selection')
+        setIsLoading(false)
         return
       }
-      endpoint = `${API_BASE_URL}/detect-custom`
-      formData.append('pt_file', customModel)
-      formData.append('model_type', customModelType)
-      formData.append('threshold', threshold)
-      formData.append('cell_diameter', cellDiameter)
 
-      payload = formData
-    } else {
-      console.log('Invalid Model Selection')
-      return
+      if (!payload) {
+        payload = JSON.stringify({
+          threshold: row.rowThreshold,
+          cell_diameter: row.rowDiameter
+        })
+
+        headers['Content-Type'] = 'application/json'
+      }
+
+      try {
+        const res = await fetch(endpoint, {
+          method: 'POST',
+          headers: headers,
+          body: payload,
+          credentials: 'include',
+        })
+        if (!res.ok) throw new Error(`${models[currentModel]} detection failed`)
+        const data = await res.json()
+
+        const yoloTxt = data.annotations
+        const imgWidth = data.image_width
+        const imgHeight = data.image_height
+
+        let importedCount = 0
+
+        yoloTxt.split('\n').forEach(line => {
+          if (!line.trim()) return
+          const parts = line.trim().split(' ')
+          const cls = parseInt(parts[0])
+          const cx = parseFloat(parts[1]) * imgWidth
+          const cy = parseFloat(parts[2]) * imgHeight
+          const w = parseFloat(parts[3]) * imgWidth
+          const h = parseFloat(parts[4]) * imgHeight
+          const x1 = cx - w / 2
+          const y1 = cy - h / 2
+          const confidence = parts[5] ? parseFloat(parts[5]) : null
+
+          let annotationClass = cls
+          if (currentModel === 0) {
+            annotationClass = 2
+          }
+          handleAddBox({x: x1, y: y1, w: w, h: h, class: annotationClass, confidence})
+
+          importedCount++
+        })
+        alert(`Detected ${importedCount} ${models[currentModel]} objects! (threshold: ${row.rowThreshold}, diameter: ${row.rowDiameter})`)
+      } catch (e) {
+        alert('Detection failed: ' + (e.response?.data?.error || e.message))
+      }
     }
 
-    if (!payload) {
-      payload = JSON.stringify({
-        threshold: threshold,
-        cell_diameter: cellDiameter
-      })
-
-      headers['Content-Type'] = 'application/json'
-    }
-
-    setIsLoading(true)
-    try {
-      const res = await fetch(endpoint, {
-        method: 'POST',
-        headers: headers,
-        body: payload,
-        credentials: 'include',
-      })
-      console.log(res)
-      if (!res.ok) throw new Error(`${models[currentModel]} detection failed`)
-      const data = await res.json()
-      
-      const yoloTxt = data.annotations
-      const imgWidth = data.image_width
-      const imgHeight = data.image_height
-
-      setAnnotations([])
-      let importedCount = 0
-
-      yoloTxt.split('\n').forEach(line => {
-        if (!line.trim()) return
-        const parts = line.trim().split(' ')
-        const cls = parseInt(parts[0])
-        const cx = parseFloat(parts[1]) * imgWidth
-        const cy = parseFloat(parts[2]) * imgHeight
-        const w = parseFloat(parts[3]) * imgWidth
-        const h = parseFloat(parts[4]) * imgHeight
-        const x1 = cx - w / 2
-        const y1 = cy - h / 2
-        const confidence = parts[5] ? parseFloat(parts[5]) : null
-
-        let annotationClass = cls
-        if (currentModel === 0) {
-          annotationClass = 2
-        }
-        handleAddBox({x: x1, y: y1, w: w, h: h, class: annotationClass, confidence})
-
-        importedCount++
-      })
-      alert(`Detected ${importedCount} ${models[currentModel]} objects!`)
-    } catch (e) {
-      alert('Detection failed: ' + (e.response?.data?.error || e.message))
-    } finally {
-      setIsLoading(false)
-    }
+    setIsLoading(false)
   }
 
   async function handleBatchDetect() {
-    if (selectedFiles.length === 0) return alert('Please select images!');
+    if (selectedFiles.length === 0) return alert('Please select images!')
 
-    const formData = new FormData();
+    setIsLoading(true)
 
-    if (currentModel === 0) {
-      formData.append('detection_type', 'SGN')
-    } else if (currentModel === 1) {
-      formData.append('detection_type', 'CD3')
-    } else if (currentModel === 2) {
-      formData.append('detection_type', 'MADM')
-    } else if (currentModel === 3) {
-      if (!customModel) {
-        alert('Please upload a custom model (.pt)')
+    for (const row of detectionSettings) {
+      const formData = new FormData()
+
+      if (currentModel === 0) {
+        formData.append('detection_type', 'SGN')
+      } else if (currentModel === 1) {
+        formData.append('detection_type', 'CD3')
+      } else if (currentModel === 2) {
+        formData.append('detection_type', 'MADM')
+      } else if (currentModel === 3) {
+        if (!customModel) {
+          alert('Please upload a custom model (.pt)')
+          setIsLoading(false)
+          return
+        }
+        formData.append('detection_type', 'custom')
+        formData.append('custom_model', customModel)
+        formData.append('model_type', customModelType)
+      } else {
+        console.log('Invalid Model Selection')
+        setIsLoading(false)
         return
       }
-      formData.append('detection_type', 'custom')
-      formData.append('custom_model', customModel)
-      formData.append('model_type', customModelType)
-    } else {
-      console.log('Invalid Model Selection')
-      return
+
+      formData.append('threshold', row.rowThreshold)
+      formData.append('cell_diameter', row.rowDiameter)
+      selectedFiles.forEach(file => formData.append('images', file))
+
+      try {
+        const res = await fetch(`${API_BASE_URL}/batch-detect`, {
+          method: 'POST',
+          body: formData,
+          credentials: 'include',
+        })
+
+        if (!res.ok) throw new Error(`${models[currentModel]} batch detection failed`)
+
+        const blob = await res.blob()
+        const url = window.URL.createObjectURL(blob)
+        const a = document.createElement('a')
+        a.href = url
+        a.download = `batch_results_t${row.rowThreshold}_d${row.rowDiameter}.zip`
+        document.body.appendChild(a)
+        a.click()
+
+        document.body.removeChild(a)
+        window.URL.revokeObjectURL(url)
+      } catch (error) {
+        console.error(error)
+        alert(`Error: ${error.message}`)
+      }
     }
 
-    formData.append('threshold', threshold)
-    formData.append('cell_diameter', cellDiameter)
-    selectedFiles.forEach(file => formData.append('images', file));
-    setIsLoading(true)
-    try {
-      const res = await fetch(`${API_BASE_URL}/batch-detect`, {
-        method: 'POST',
-        body: formData,
-        credentials: 'include',
-      });
-
-      if (!res.ok) throw new Error(`${models[currentModel]} batch detection failed`)
-      
-      const blob = await res.blob();
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = 'batch_results.zip';
-      document.body.appendChild(a);
-      a.click();
-
-      document.body.removeChild(a);
-      window.URL.revokeObjectURL(url);
-
-      setSelectedFiles([])
-
-    } catch (error) {
-      console.error(error);
-      alert(`Error: ${error.message}`)
-    } finally {
-      setIsLoading(false)
-    }
+    setSelectedFiles([])
+    setIsLoading(false)
   }
 
   function handleLoadCustomModel(e) {
@@ -1023,6 +1030,15 @@ export default function CellAnnotationTool() {
     setTrainingMetricsModalOpen(false)
   }
 
+  // Detection settings modal state
+  const [detectionSettingsModalOpen, setDetectionSettingsModalOpen] = useState(false)
+  const handleOpenDetectionSettingsModal = () => {
+    setDetectionSettingsModalOpen(true)
+  }
+  const handleCloseDetectionSettingsModal = () => {
+    setDetectionSettingsModalOpen(false)
+  }
+
   // Calibrator
   const [calibratorOpen, setCalibratorOpen] = useState(false)
 
@@ -1044,6 +1060,42 @@ export default function CellAnnotationTool() {
     width: '100%',
     mb: 1
   }
+
+    // *----------* Row Menu Helpers *----------* \\
+
+  const generateId = () => {
+    if (typeof window !== 'undefined' && window.crypto && window.crypto.randomUUID) {
+      return window.crypto.randomUUID()
+    }
+    // Fallback string generator if crypto isn't available (e.g. non-HTTPS)
+    return Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
+  }
+
+  const createEmptyRow = () => {
+    return {
+      id: generateId(),
+      rowThreshold: 0.5,
+      rowDiameter: 34,
+    }
+  }
+
+  const [detectionSettings, setDetectionSettings] = useState([createEmptyRow()])
+
+  const handleRowChange = (index, fieldName, value) => {
+    setDetectionSettings((prevRows) => {
+      const updatedRows = [...prevRows]
+
+      updatedRows[index] = {
+        ...updatedRows[index],
+        [fieldName]: value,
+      }
+
+      return updatedRows
+    })
+  }
+
+  const handleAddRow = () => setDetectionSettings((prevRows) => [...prevRows, createEmptyRow()])
+  const handleDeleteRow = (indexToRemove) => setDetectionSettings((prevRows) => prevRows.filter((_, i) => i !== indexToRemove))
 
   const tabs = [
 		{
@@ -1320,47 +1372,62 @@ export default function CellAnnotationTool() {
             <Button variant='contained' component='label' onClick={() => setCalibratorOpen(true)} sx={{...button_style_span}}>
               Calibrate Cell Size
             </Button>
-            <Box display='flex' flexDirection='row'>
-              <Box sx={{width: '50%', display: 'flex', flexDirection: 'column', mr: 1}}>
-                <TextField
-                  value={threshold}
-                  onChange={(e) => setThreshold(Number(e.target.value))}
-                  type='number'
-                  variant='outlined'
-                  size='small'
-                  slotProps={{ 
-                    htmlInput: {
-                      step: 0.1,
-                      min: 0,
-                      max: 1
-                    }
-                  }}
-                  sx={{...button_style_span, mt: 'auto', mb: 0}}
-                />
-                <Typography gutterBottom variant='body2' sx={{ fontWeight: 'bold' }}>
-                  Threshold <br /> (0-1)
-                </Typography>
+            <Button variant='contained' component='label' onClick={handleOpenDetectionSettingsModal} sx={{...button_style_span}}>
+              Edit Settings
+            </Button>
+            <Modal
+              open={detectionSettingsModalOpen}
+              onClose={handleCloseDetectionSettingsModal}
+            >
+              <Box sx={{...modal_style, width: 800,}}>
+                <Typography variant="h5" gutterBottom>Detection Settings</Typography>
+                <Paper variant="outlined" sx={{ p: 3, mb: 4 }}>
+                  <RowMenu
+                    rows={detectionSettings}
+                    onAdd={handleAddRow}
+                    onDelete={handleDeleteRow}
+                    onChange={handleRowChange}
+                    headers={['Threshold (0-1)', 'Cell Diameter']}
+                    gridTemplateColumns={'1fr 1fr'}
+                    renderRowTemplate={(row, index, handleFieldChange) => {
+                      return (
+                        <Box display="grid" gridTemplateColumns="1fr 1fr" gap={2} width="100%">
+
+                          {/* 1. Decimal Input (0 to 1) */}
+                          <TextField
+                            label="Threshold (0-1)"
+                            type="number"
+                            size="small"
+                            inputProps={{ step: "0.1", min: "0", max: "1" }}
+                            value={row.rowThreshold}
+                            onChange={(e) => {
+                              let val = parseFloat(e.target.value)
+                              if (val > 1) val = 1
+                              if (val < 0) val = 0
+                              handleFieldChange('rowThreshold', isNaN(val) ? '' : val)
+                            }}
+                          />
+
+                          {/* 2. Integer Input (Default 34) */}
+                          <TextField
+                            label="Cell Diameter"
+                            type="number"
+                            size="small"
+                            inputProps={{ step: "1" }}
+                            value={row.rowDiameter}
+                            onChange={(e) => {
+                              const val = parseInt(e.target.value, 10)
+                              handleFieldChange('rowDiameter', isNaN(val) ? '' : val)
+                            }}
+                          />
+
+                        </Box>
+                      )
+                    }}
+                  />
+                </Paper>
               </Box>
-              <Box  sx={{width: '50%', display: 'flex', flexDirection: 'column', ml: 1}}>
-                <TextField
-                  value={cellDiameter}
-                  onChange={(e) => setCellDiameter(Number(e.target.value))}
-                  type='number'
-                  variant='outlined'
-                  size='small'
-                  slotProps={{ 
-                    htmlInput: {
-                      step: 1,
-                      min: 0
-                    },
-                  }}
-                  sx={{...button_style_span, mt: 'auto', mb: 0}}
-                />
-                <Typography gutterBottom variant='body2' sx={{ fontWeight: 'bold' }}>
-                  Average Cell Diameter
-                </Typography>
-              </Box>
-            </Box>
+            </Modal>
           </Box>
           <Button variant='contained' component='label' onClick={detect} sx={{...button_style_span}}>
             Single Detect
