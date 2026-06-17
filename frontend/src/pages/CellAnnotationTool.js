@@ -506,11 +506,11 @@ export default function CellAnnotationTool() {
           if (currentModel === 0) {
             annotationClass = 2
           }
-          handleAddBox({x: x1, y: y1, w: w, h: h, class: annotationClass, confidence})
+          
+          handleAddBox({x: x1, y: y1, w: w, h: h, class: annotationClass, confidence: confidence, label:  `T:${row.rowThreshold} D:${row.rowDiameter}`})
 
           importedCount++
         })
-        alert(`Detected ${importedCount} ${models[currentModel]} objects! (threshold: ${row.rowThreshold}, diameter: ${row.rowDiameter})`)
       } catch (e) {
         alert('Detection failed: ' + (e.response?.data?.error || e.message))
       }
@@ -524,61 +524,65 @@ export default function CellAnnotationTool() {
 
     setIsLoading(true)
 
-    for (const row of detectionSettings) {
-      const formData = new FormData()
+    const formData = new FormData()
 
-      if (currentModel === 0) {
-        formData.append('detection_type', 'SGN')
-      } else if (currentModel === 1) {
-        formData.append('detection_type', 'CD3')
-      } else if (currentModel === 2) {
-        formData.append('detection_type', 'MADM')
-      } else if (currentModel === 3) {
-        if (!customModel) {
-          alert('Please upload a custom model (.pt)')
-          setIsLoading(false)
-          return
-        }
-        formData.append('detection_type', 'custom')
-        formData.append('custom_model', customModel)
-        formData.append('model_type', customModelType)
-      } else {
-        console.log('Invalid Model Selection')
+    if (currentModel === 0) {
+      formData.append('detection_type', 'SGN')
+    } else if (currentModel === 1) {
+      formData.append('detection_type', 'CD3')
+    } else if (currentModel === 2) {
+      formData.append('detection_type', 'MADM')
+    } else if (currentModel === 3) {
+      if (!customModel) {
+        alert('Please upload a custom model (.pt)')
         setIsLoading(false)
         return
       }
-
-      formData.append('threshold', row.rowThreshold)
-      formData.append('cell_diameter', row.rowDiameter)
-      selectedFiles.forEach(file => formData.append('images', file))
-
-      try {
-        const res = await fetch(`${API_BASE_URL}/batch-detect`, {
-          method: 'POST',
-          body: formData,
-          credentials: 'include',
-        })
-
-        if (!res.ok) throw new Error(`${models[currentModel]} batch detection failed`)
-
-        const blob = await res.blob()
-        const url = window.URL.createObjectURL(blob)
-        const a = document.createElement('a')
-        a.href = url
-        a.download = `batch_results_t${row.rowThreshold}_d${row.rowDiameter}.zip`
-        document.body.appendChild(a)
-        a.click()
-
-        document.body.removeChild(a)
-        window.URL.revokeObjectURL(url)
-      } catch (error) {
-        console.error(error)
-        alert(`Error: ${error.message}`)
-      }
+      formData.append('detection_type', 'custom')
+      formData.append('custom_model', customModel)
+      formData.append('model_type', customModelType)
+    } else {
+      console.log('Invalid Model Selection')
+      setIsLoading(false)
+      return
     }
 
-    setSelectedFiles([])
-    setIsLoading(false)
+    // Send all rows' settings as a single JSON array
+    formData.append('detection_settings', JSON.stringify(
+      detectionSettings.map(row => ({
+        threshold: row.rowThreshold,
+        cell_diameter: row.rowDiameter
+      }))
+    ))
+
+    selectedFiles.forEach(file => formData.append('images', file))
+
+    try {
+      const res = await fetch(`${API_BASE_URL}/batch-detect`, {
+        method: 'POST',
+        body: formData,
+        credentials: 'include',
+      })
+
+      if (!res.ok) throw new Error(`${models[currentModel]} batch detection failed`)
+
+      const blob = await res.blob()
+      const url = window.URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = 'batch_results.zip'
+      document.body.appendChild(a)
+      a.click()
+
+      document.body.removeChild(a)
+      window.URL.revokeObjectURL(url)
+    } catch (error) {
+      console.error(error)
+      alert(`Error: ${error.message}`)
+    } finally {
+      setSelectedFiles([])
+      setIsLoading(false)
+    }
   }
 
   function handleLoadCustomModel(e) {
