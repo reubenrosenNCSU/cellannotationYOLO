@@ -507,7 +507,7 @@ export default function CellAnnotationTool() {
             annotationClass = 2
           }
           
-          handleAddBox({x: x1, y: y1, w: w, h: h, class: annotationClass, confidence: confidence, label:  `T:${row.rowThreshold} D:${row.rowDiameter}`})
+          handleAddBox({x: x1, y: y1, w: w, h: h, class: annotationClass, confidence: confidence, label:  row.rowSublabel})
 
           importedCount++
         })
@@ -1078,6 +1078,7 @@ export default function CellAnnotationTool() {
   const createEmptyRow = () => {
     return {
       id: generateId(),
+      rowSublabel: '',
       rowThreshold: 0.5,
       rowDiameter: 34,
     }
@@ -1391,11 +1392,21 @@ export default function CellAnnotationTool() {
                     onAdd={handleAddRow}
                     onDelete={handleDeleteRow}
                     onChange={handleRowChange}
-                    headers={['Threshold (0-1)', 'Cell Diameter']}
-                    gridTemplateColumns={'1fr 1fr'}
+                    headers={['Sublabel', 'Threshold (0-1)', 'Cell Diameter']}
+                    gridTemplateColumns={'2fr 1fr 1fr'}
                     renderRowTemplate={(row, index, handleFieldChange) => {
                       return (
-                        <Box display="grid" gridTemplateColumns="1fr 1fr" gap={2} width="100%">
+                        <Box display="grid" gridTemplateColumns="2fr 1fr 1fr" gap={2} width="100%">
+                          {/* Label */}
+                          <TextField
+                            label="Sublabel"
+                            size="small"
+                            value={row.rowSublabel}
+                            onChange={(e) => {
+                              let val = e.target.value
+                              handleFieldChange('rowSublabel', val)
+                            }}
+                          />
 
                           {/* 1. Decimal Input (0 to 1) */}
                           <TextField
