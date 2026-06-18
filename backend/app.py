@@ -839,6 +839,7 @@ def detect():
     model_id = data['model_id']
     threshold = float(data.get('threshold', 0.5))
     cell_diameter = float(data.get('cell_diameter', 34))
+    label = data.get('label', '')
 
     try:
         # Fetch records and verify ownership
@@ -934,7 +935,8 @@ def detect():
                 "h": pixel_h,
                 "class": cls,
                 "confidence": conf,
-                "is_detected": True
+                "is_detected": True,
+                "label": label
             })
 
         # 6. Save/Override the physical standard YOLO txt file asset

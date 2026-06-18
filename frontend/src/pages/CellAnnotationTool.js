@@ -493,6 +493,8 @@ export default function CellAnnotationTool() {
         setImageName('')
         setImageURL('')
         setImageSize({width: 0, height: 0})
+        setAnnotations([])
+        setBoxes([])
       }
     } catch (e) {
       console.error('Image deletion failed:', e.message)
@@ -733,7 +735,8 @@ export default function CellAnnotationTool() {
         image_id: imageID,
         model_id: row.selectedModelId,
         threshold: row.rowThreshold,
-        cell_diameter: row.rowDiameter
+        cell_diameter: row.rowDiameter,
+        label: row.rowSublabel
       }
 
       try {
@@ -759,14 +762,28 @@ export default function CellAnnotationTool() {
           color: data.labels.labels[box.class].color
         }))
         setAnnotations((prevAnnotations) => {
-          return prevAnnotations.map((modelObj) => {
-            if (modelObj.annotation_id === targetId) {
-              return {
-                ...modelObj,
-                annotations: newAnnotations
+          const exists = prevAnnotations.some(
+            (modelObj) => modelObj.id === targetId || modelObj.annotation_id === targetId
+          )
+
+          if (exists) {
+            return prevAnnotations.map((modelObj) => {
+              const id = modelObj.id || modelObj.annotation_id
+              return id === targetId
+                ? { ...modelObj, annotations: newAnnotations }
+                : modelObj
+            })
+          } else {
+            // First detection for this model — append a new entry
+            return [
+              ...prevAnnotations,
+              {
+                annotation_id: targetId,
+                annotations: newAnnotations,
+                labels: data.labels,
               }
-            }
-          })
+            ]
+          }
         })
         setBoxes((prevBoxes) => {
           const filteredBoxes = prevBoxes.filter(box => box.annotation_id != targetId)
@@ -1364,6 +1381,7 @@ export default function CellAnnotationTool() {
       selectedClasses: [],
       rowThreshold: 0.5,
       rowDiameter: 34,
+      rowSublabel: ''
     }
   }
 
@@ -1644,8 +1662,8 @@ export default function CellAnnotationTool() {
                     onAdd={handleAddRow}
                     onDelete={handleDeleteRow}
                     onChange={handleRowChange}
-                    headers={['Model', 'Classes', 'Threshold. (0-1)', 'Cell Diameter']}
-                    gridTemplateColumns={'2fr 2fr 1fr 1fr'}
+                    headers={['Model', 'Classes', 'Threshold (0-1)', 'Cell Diameter', 'Label']}
+                    gridTemplateColumns={'2fr 2fr 1fr 1fr 2fr'}
                     renderRowTemplate={(row, index, handleFieldChange) => {
                       // Find the full model data matching this row's selected model ID
                       const currentModelData = models.find(m => m.id === row.selectedModelId);
@@ -1653,9 +1671,7 @@ export default function CellAnnotationTool() {
                       const availableLabels = currentModelData?.label_set?.labels || [];
 
                       return (
-                        <Box display="grid" gridTemplateColumns="2fr 2fr 1fr 1fr" gap={2} width="100%">
-                          
-                          {/* 1. Single Select Dropdown (Model) */}
+                        <Box display="grid" gridTemplateColumns="2fr 2fr 1fr 1fr 2fr" gap={2} width="100%">
                           <FormControl fullWidth size="small">
                             <InputLabel>Model</InputLabel>
                             <Select
@@ -1670,8 +1686,6 @@ export default function CellAnnotationTool() {
                               ))}
                             </Select>
                           </FormControl>
-
-                          {/* 2. Multi-Select Dropdown (Classes conditional on Model) */}
                           <FormControl fullWidth size="small" disabled={!row.selectedModelId}>
                             <InputLabel>Classes</InputLabel>
                             <Select
@@ -1703,8 +1717,6 @@ export default function CellAnnotationTool() {
                               ))}
                             </Select>
                           </FormControl>
-
-                          {/* 3. Decimal Input (0 to 1) */}
                           <TextField
                             label="Threshold (0-1)"
                             type="number"
@@ -1718,8 +1730,6 @@ export default function CellAnnotationTool() {
                               handleFieldChange('decimalValue', isNaN(val) ? '' : val);
                             }}
                           />
-
-                          {/* 4. Integer Input (Default 34) */}
                           <TextField
                             label="Cell Diameter"
                             type="number"
@@ -1729,6 +1739,15 @@ export default function CellAnnotationTool() {
                             onChange={(e) => {
                               const val = parseInt(e.target.value, 10);
                               handleFieldChange('integerValue', isNaN(val) ? '' : val);
+                            }}
+                          />
+                          <TextField
+                            label="Sublabel"
+                            size="small"
+                            value={row.rowSublabel}
+                            onChange={(e) => {
+                              let val = e.target.value
+                              handleFieldChange('rowSublabel', val)
                             }}
                           />
 
