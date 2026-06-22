@@ -436,7 +436,8 @@ def save_annotations():
         data = request.get_json()
         image_id = data['image_id']
         weights = data['model']
-        annotations = data['annotations']
+        annotations_detected = data['annotations_detected']
+        annotations_drawn = data['annotations_drawn']
         annotation_dir = g.user.get_path('annotations')
 
         existing_annotation = Annotation.query.filter_by(
@@ -448,8 +449,10 @@ def save_annotations():
         if existing_annotation:
             unique_id = existing_annotation.id
             full_path = existing_annotation.file_path
-            existing_annotation.annotations = list(annotations)
-            existing_annotation.count = len(annotations)
+            existing_annotation.annotations_detected = list(annotations_detected)
+            existing_annotation.count_detected = len(annotations_detected)
+            existing_annotation.annotations_drawn = list(annotations_drawn)
+            existing_annotation.count_drawn = len(annotations_drawn)
             
             flag_modified(existing_annotation, "annotations")
         else:
@@ -463,15 +466,26 @@ def save_annotations():
                 file_path=full_path,
                 image_id=image_id,
                 weights_id=weights['id'],
-                annotations=annotations,
-                count=len(annotations)
+                annotations_detected=annotations_detected,
+                count_detected=len(annotations_detected),
+                annotations_drawn=annotations_drawn,
+                count_drawn=len(annotations_drawn)
             )
             db.session.add(new_annotation)
 
         db.session.commit()
 
         yolo_lines = []
-        for ann in annotations:
+        for ann in annotations_detected:
+            line = "{0} {1:.6f} {2:.6f} {3:.6f} {4:.6f}".format(
+                ann['class'],
+                ann['x'],
+                ann['y'],
+                ann['w'],
+                ann['h']
+            )
+            yolo_lines.append(line)
+        for ann in annotations_drawn:
             line = "{0} {1:.6f} {2:.6f} {3:.6f} {4:.6f}".format(
                 ann['class'],
                 ann['x'],
@@ -710,8 +724,13 @@ def load_annotations():
         results.append({
             "id": ann.id,
             "weights_id": ann.weights_id,
-            "annotations": ann.annotations,  # SQLAlchemy parses JSON columns automatically
-            "count": ann.count,
+            "threshold": ann.threshold,
+            "cell_diameter": ann.cell_diameter,
+            "sublabel": ann.sublabel,
+            "annotations_detected": ann.annotations_detected,  # SQLAlchemy parses JSON columns automatically
+            "annotations_drawn": ann.annotations_drawn,
+            "count_detected": ann.count_detected,
+            "count_drawn": ann.count_drawn,
             "labels": annotation_weights.label_set.to_dict()
         })
 
@@ -796,7 +815,7 @@ def clear_annotations():
             return jsonify({"error": "No matching annotations found for this image"}), 404
 
         # Track file paths before removing from the DB
-        annotation_paths = [ann.file_path for ann in annotations_to_delete]
+        annotation_paths = [ann.file_path for ann in target_annotations]
         
         # Update database
         for ann in target_annotations:
@@ -839,7 +858,7 @@ def detect():
     model_id = data['model_id']
     threshold = float(data.get('threshold', 0.5))
     cell_diameter = float(data.get('cell_diameter', 34))
-    label = data.get('label', '')
+    sublabel = data.get('sublabel', '')
 
     try:
         # Fetch records and verify ownership
@@ -877,7 +896,8 @@ def detect():
             weights_id=model_id, 
             user_id=g.user.id ,
             threshold=threshold,
-            cell_diameter=cell_diameter
+            cell_diameter=cell_diameter,
+            sublabel=sublabel
         ).first()
         
 
@@ -897,7 +917,8 @@ def detect():
                 image_id=image_id,
                 weights_id=model_id,
                 threshold=threshold,
-                cell_diameter=cell_diameter
+                cell_diameter=cell_diameter,
+                sublabel=sublabel
             )
             db.session.add(target_record)
             annotation_id=unique_id
@@ -936,7 +957,7 @@ def detect():
                 "class": cls,
                 "confidence": conf,
                 "is_detected": True,
-                "label": label
+                "sublabel": sublabel
             })
 
         # 6. Save/Override the physical standard YOLO txt file asset
@@ -945,11 +966,11 @@ def detect():
             f.write("\n".join(yolo_lines))
 
         # 7. Update database record values and flag JSON mutation tracking
-        target_record.annotations = converted_annotations
-        target_record.count = len(converted_annotations)
+        target_record.annotations_detected = converted_annotations
+        target_record.count_detected = len(converted_annotations)
         
         from sqlalchemy.orm.attributes import flag_modified
-        flag_modified(target_record, "annotations")
+        flag_modified(target_record, "annotations_detected")
         
         db.session.commit()
 
@@ -962,8 +983,7 @@ def detect():
         return jsonify({
             "annotations": converted_annotations,
             "annotation_id": annotation_id,
-            "labels": annotation_weights.label_set.to_dict(),
-            "is_detected": True
+            "labels": annotation_weights.label_set.to_dict()
         })
 
     except Exception as e:

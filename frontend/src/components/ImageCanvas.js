@@ -180,7 +180,7 @@ export default function ImageCanvas({ src, boxes, onAddBox, onRemoveBox, isCropp
 
       if (showLabels) {
         const label = box.confidence != null
-          ? `${box.name} ${(box.confidence * 100).toFixed(0)}%${box.label ? ` - ${box.label}` : ''}`
+          ? `${box.name} ${(box.confidence * 100).toFixed(0)}%${box.sublabel ? ` - ${box.sublabel}` : ''}`
           : box.name
         const padding = 2 / scale
         const textWidth = ctx.measureText(label).width

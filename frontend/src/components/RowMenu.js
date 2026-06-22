@@ -2,18 +2,17 @@ import { Box, Button, IconButton, Stack, Typography } from '@mui/material'
 import DeleteIcon from '@mui/icons-material/Delete'
 import AddIcon from '@mui/icons-material/Add'
 
-const RowMenu = ({ rows, onChange, onDelete, onAdd, renderRowTemplate, headers, gridTemplateColumns }) => {
+const RowMenu = ({ rows, onChange, onDelete, onAdd, onSelect, selectedRowId, renderRowTemplate, headers, gridTemplateColumns }) => {
   return (
     <Box>
       {headers && headers.length > 0 && (
         <Box 
           display="grid" 
-          // Uses the exact grid layout passed by the parent, or defaults to an equal split
           gridTemplateColumns={gridTemplateColumns || `repeat(${headers.length}, 1fr)`} 
           gap={2} 
           sx={{ 
             mb: 1,
-            pr: '40px' // Masks out the space occupied by the delete icon below
+            pr: '40px'
           }} 
         >
           {headers.map((header, idx) => (
@@ -29,29 +28,49 @@ const RowMenu = ({ rows, onChange, onDelete, onAdd, renderRowTemplate, headers, 
         </Box>
       )}
 
-      <Stack spacing={2} sx={{ width: '100%', mt: 1 }}>
-        {rows.map((row, index) => (
-          <Box 
-            key={row.id}
-            display='flex'
-            flexDirection="row"
-            sx={{
-              position: 'relative',
-            }}
-          >
-            {/* Dynamically render whatever the parent passed as a template */}
-            <Box sx={{ flexGrow: 1, minWidth: 0 }}>
-              {renderRowTemplate(row, index, (fieldName, value) => onChange(index, fieldName, value))}
-            </Box>
+      <Stack spacing={1} sx={{ width: '100%', mt: 1 }}>
+        {rows.map((row, index) => {
+          const isSelected = row.id === selectedRowId
+          return (
+            <Box 
+              key={row.id}
+              display='flex'
+              flexDirection="row"
+              alignItems="center"
+              onClick={() => onSelect?.(row.id)}
+              sx={{
+                position: 'relative',
+                borderRadius: 1,
+                border: '2px solid',
+                borderColor: isSelected ? 'primary.main' : 'transparent',
+                bgcolor: isSelected ? 'action.selected' : 'action.hover',
+                cursor: 'pointer',
+                px: 1,
+                py: 0.5,
+                transition: 'border-color 0.15s, background-color 0.15s',
+                '&:hover': {
+                  borderColor: isSelected ? 'primary.main' : 'primary.light',
+                  bgcolor: isSelected ? 'action.selected' : 'action.hover',
+                }
+              }}
+            >
+              <Box sx={{ flexGrow: 1, minWidth: 0 }}>
+                {renderRowTemplate(row, index, (fieldName, value) => onChange(index, fieldName, value))}
+              </Box>
 
-            {/* Delete Button */}
-            <IconButton color="error" onClick={() => onDelete(index)}>
+              <IconButton 
+                color="error" 
+                onClick={(e) => {
+                  e.stopPropagation() // Prevent row selection when deleting
+                  onDelete(index)
+                }}
+              >
                 <DeleteIcon />
-            </IconButton>
-          </Box>
-        ))}
+              </IconButton>
+            </Box>
+          )
+        })}
 
-        {/* Add Row Button */}
         <Button 
           variant="contained" 
           startIcon={<AddIcon />} 

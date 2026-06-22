@@ -113,11 +113,13 @@ class Annotation(db.Model):
     image_id = db.Column(db.String(36), db.ForeignKey('image_record.id', ondelete='CASCADE'))
     weights_id = db.Column(db.String(36), db.ForeignKey('weights.id'), nullable=False)
     
-    annotations = db.Column(db.JSON, nullable=False)
-    count = db.Column(db.Integer, default=0)
+    annotations_detected = db.Column(db.JSON, nullable=False, default=list)
+    annotations_drawn = db.Column(db.JSON, nullable=False, default=list)
+    count_detected = db.Column(db.Integer, default=0)
+    count_drawn = db.Column(db.Integer, default=0)
     threshold = db.Column(db.Float)
     cell_diameter = db.Column(db.Integer)
-    is_detected = db.Column(db.Boolean)
+    sublabel = db.Column(db.String(128))
 
 
 

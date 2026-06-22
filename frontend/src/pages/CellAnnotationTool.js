@@ -1,5 +1,5 @@
 import { useState, useEffect, Fragment } from 'react'
-import { Box, Button, Typography, Modal, Checkbox, Container, Paper, Select, FormControl, InputLabel, OutlinedInput, Chip } from '@mui/material'
+import { Box, Button, Typography, Modal, IconButton, Checkbox, Popover, Paper, Select, FormControl, InputLabel, OutlinedInput, Chip } from '@mui/material'
 import PopupState, { bindTrigger, bindMenu } from 'material-ui-popup-state'
 import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown'
 import Menu from '@mui/material/Menu'
@@ -7,6 +7,7 @@ import MenuItem from '@mui/material/MenuItem'
 import Stack from '@mui/material/Stack'
 import TextField from '@mui/material/TextField'
 import DownloadIcon from '@mui/icons-material/Download'
+import SettingsIcon from '@mui/icons-material/Settings'
 import Tooltip from '@mui/material/Tooltip'
 import CircularProgress from '@mui/material/CircularProgress'
 import AppBar from '@mui/material/AppBar'
@@ -452,20 +453,45 @@ export default function CellAnnotationTool() {
       const annoList = data.annotations || []
       const boxList = annoList.flatMap((modelObj) => {
         const annotationId = modelObj.id
-        const isDetected = modelObj.is_detected
         const labels = modelObj.labels.labels
-        const innerList = modelObj.annotations || []
-        
-        return innerList.map((box) => ({
+
+        const detectedBoxes = (modelObj.annotations_detected || []).map((box) => ({
           ...box,
           annotation_id: annotationId,
-          is_detected: isDetected,
+          is_detected: true,
           name: labels[box.class].name,
           color: labels[box.class].color,
         }))
+
+        const drawnBoxes = (modelObj.annotations_drawn || []).map((box) => ({
+          ...box,
+          annotation_id: annotationId,
+          is_detected: false,
+          name: labels[box.class].name,
+          color: labels[box.class].color,
+        }))
+
+        return [...detectedBoxes, ...drawnBoxes]
       })
 
       setBoxes(boxList)
+
+      if (annoList.length > 0) {
+        const loadedRows = annoList.map((modelObj) => {
+          const annotationId = modelObj.id
+          const labels = modelObj.labels?.labels || []
+          return {
+            id: annotationId,  // real annotation id as row id
+            selectedModelId: modelObj.weights_id,
+            selectedClasses: labels.map(l => l.name),
+            rowThreshold: modelObj.threshold ?? 0.5,
+            rowDiameter: modelObj.cell_diameter ?? 34,
+            rowSublabel: modelObj.sublabel ?? ''
+          }
+        })
+        setDetectionSettings(loadedRows)
+        setSelectedRowId(loadedRows[0].id)
+      }
 
     } catch (e) {
       console.error('Annotation load failed:', e.message)
@@ -514,21 +540,59 @@ export default function CellAnnotationTool() {
   // *----------* Annotation Operations *----------* \\
 
   const handleAddBox = (box) => {
-    //console.log(box)
-    // if (!box.class) {
-    //   console.log("Assigning default class")
-    //   box.class = currentClass
-    // }
-    if (imageURL) {
-      setAnnotations(prev => {
-        const tempAnnotations = [...prev]
-        const currentGroup = tempAnnotations[currentModel] || []
-        tempAnnotations[currentModel] = [...currentGroup, box]
-        return tempAnnotations
-      })
-      setUndoStack(prev => [...prev, box])
-      //detectCellDiameter()
+    if (!imageURL || !selectedRowId) return
+
+    // Find the selected row to get model info
+    const selectedRow = detectionSettings.find(r => r.id === selectedRowId)
+    if (!selectedRow) return
+
+    const model = models.find(m => m.id === selectedRow.selectedModelId)
+    if (!model) return
+
+    const labels = model.label_set?.labels || []
+    const classLabel = labels[box.class] || { name: 'Unknown', color: '#ffffff' }
+
+    const enrichedBox = {
+      ...box,
+      annotation_id: selectedRowId,
+      is_detected: false,
+      name: classLabel.name,
+      color: classLabel.color,
     }
+
+    // Add to boxes for canvas rendering
+    setBoxes(prev => [...prev, enrichedBox])
+
+    // Add to the correct annotation group's annotations_drawn
+    setAnnotations(prev => {
+      const exists = prev.some(
+        modelObj => (modelObj.id ?? modelObj.annotation_id) === selectedRowId
+      )
+
+      if (exists) {
+        return prev.map(modelObj => {
+          const id = modelObj.id ?? modelObj.annotation_id
+          if (id !== selectedRowId) return modelObj
+          return {
+            ...modelObj,
+            annotations_drawn: [...(modelObj.annotations_drawn || []), box]
+          }
+        })
+      } else {
+        // No annotation group yet for this row — create one
+        return [
+          ...prev,
+          {
+            annotation_id: selectedRowId,
+            annotations_detected: [],
+            annotations_drawn: [box],
+            labels: model.label_set,
+          }
+        ]
+      }
+    })
+
+    setUndoStack(prev => [...prev, enrichedBox])
   }
 
   const handleRemoveBox = (targetBox) => {
@@ -595,25 +659,36 @@ export default function CellAnnotationTool() {
     setIsLoading(true)
 
     try {
-      for (const [i, list] of annotations.entries()) {
-        if (!list || list.length < 1) continue
+      for (const modelObj of annotations) {
+        const annotationsDetected = modelObj.annotations_detected || []
+        const annotationsDrawn = modelObj.annotations_drawn || []
+
+        if (annotationsDetected.length === 0 && annotationsDrawn.length === 0) continue
+
+        const modelId = modelObj.id ?? modelObj.annotation_id
+        const model = models.find(m => m.id === modelId) // look up by id, not index
+
+        if (!model) {
+          console.warn(`No model found for annotation group ${modelId}, skipping`)
+          continue
+        }
 
         const res = await fetch(`${API_BASE_URL}/save-annotations`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             image_id: imageID,
-            annotations: list,
-            model: models[i],
+            annotations_detected: annotationsDetected,
+            annotations_drawn: annotationsDrawn,
+            model: model,
           }),
           credentials: 'include',
         })
 
-        if (!res.ok) throw new Error(`Save failed for model at index ${i}`)
-        
-        console.log(`Saved index ${i} successfully`)
+        if (!res.ok) throw new Error(`Save failed for annotation group ${modelId}`)
+
+        console.log(`Saved annotation group ${modelId} successfully`)
       }
-      //const data = await res.json()
     } catch(e) {
       alert('Save failed: ' + (e.response?.data?.error || e.message))
     } finally {
@@ -731,12 +806,13 @@ export default function CellAnnotationTool() {
     setIsLoading(true)
 
     for (const row of detectionSettings) {
+      const tempRowId = row.id  
       const payload = {
         image_id: imageID,
         model_id: row.selectedModelId,
         threshold: row.rowThreshold,
         cell_diameter: row.rowDiameter,
-        label: row.rowSublabel
+        sublabel: row.rowSublabel
       }
 
       try {
@@ -758,6 +834,7 @@ export default function CellAnnotationTool() {
         const newBoxes = newAnnotations.map(box => ({
           ...box,
           annotation_id: targetId,
+          is_detected: true,
           name: data.labels.labels[box.class].name,
           color: data.labels.labels[box.class].color
         }))
@@ -770,7 +847,7 @@ export default function CellAnnotationTool() {
             return prevAnnotations.map((modelObj) => {
               const id = modelObj.id || modelObj.annotation_id
               return id === targetId
-                ? { ...modelObj, annotations: newAnnotations }
+                ? { ...modelObj, annotations_detected: newAnnotations }
                 : modelObj
             })
           } else {
@@ -779,7 +856,7 @@ export default function CellAnnotationTool() {
               ...prevAnnotations,
               {
                 annotation_id: targetId,
-                annotations: newAnnotations,
+                annotations_detected: newAnnotations,
                 labels: data.labels,
               }
             ]
@@ -789,6 +866,9 @@ export default function CellAnnotationTool() {
           const filteredBoxes = prevBoxes.filter(box => box.annotation_id != targetId)
           return [...filteredBoxes, ...newBoxes]
         })
+        setDetectionSettings((prevRows) =>
+          prevRows.map((r) => r.id === tempRowId ? { ...r, id: targetId } : r)
+        )
       } catch (e) {
         alert('Detection failed: ' + (e.response?.data?.error || e.message))
       } finally {
@@ -1331,6 +1411,13 @@ export default function CellAnnotationTool() {
     setDetectionSettingsModalOpen(false)
   }
 
+  const [selectedRowId, setSelectedRowId] = useState(null)
+  const [settingsAnchor, setSettingsAnchor] = useState(null)
+  const [settingsRowIndex, setSettingsRowIndex] = useState(null)
+  const [editingSublabelIndex, setEditingSublabelIndex] = useState(null)
+  const [sublabelDraft, setSublabelDraft] = useState('')
+  const [modelDropdownIndex, setModelDropdownIndex] = useState(null)
+
   // Calibrator
   const [calibratorOpen, setCalibratorOpen] = useState(false)
 
@@ -1411,7 +1498,14 @@ export default function CellAnnotationTool() {
 
   const handleAddRow = () => setDetectionSettings((prevRows) => [...prevRows, createEmptyRow()])
   const handleDeleteRow = (indexToRemove) => setDetectionSettings((prevRows) => prevRows.filter((_, i) => i !== indexToRemove))
+  const handleSelectRow = (id) => {
+    setSelectedRowId(id)
+    setCurrentClass(0)
+  }
 
+  const selectedRow = detectionSettings.find(r => r.id === selectedRowId)
+  const selectedRowModel = models.find(m => m.id === selectedRow?.selectedModelId)
+  const selectedRowClasses = selectedRowModel?.label_set?.labels || []
   const tabs = [
 		{
 			label: 'Annotate',
@@ -1426,13 +1520,20 @@ export default function CellAnnotationTool() {
                 <Button variant='contained' {...bindTrigger(popupState)} 
                   endIcon={<KeyboardArrowDownIcon />} 
                   sx={{...button_style_span, mt: 1}}
-                  disabled={!classes[currentModel] || classes[currentModel].length === 0}
+                  disabled={selectedRowClasses.length === 0}
                 >
-                  {classes[currentModel]?.length > 0 ? classes[currentModel][currentClass]?.name : "No Classes Available"}
+                  {selectedRowClasses.length > 0 ? selectedRowClasses[currentClass]?.name : "No Classes Available"}
                 </Button>
                 <Menu {...bindMenu(popupState)}>
-                  {classes[currentModel]?.map((item, index) => (
-                    <Box display="flex" alignItems="center" gap={2}>
+                  {selectedRowClasses.map((item, index) => (
+                    <Box 
+                      key={index}
+                      display="flex" 
+                      alignItems="center" 
+                      gap={2}
+                      onClick={() => { setCurrentClass(index); popupState.close() }}
+                      sx={{ px: 2, py: 1, cursor: 'pointer', '&:hover': { bgcolor: 'action.hover' } }}
+                    >
                       <input
                         type="color"
                         value={item.color}
@@ -1456,6 +1557,198 @@ export default function CellAnnotationTool() {
             )}
           </PopupState>
           <Box sx={{pt: 1, borderTop: 1, borderColor: 'grey.500'}}>
+            <RowMenu
+              rows={detectionSettings}
+              onAdd={handleAddRow}
+              onDelete={handleDeleteRow}
+              onChange={handleRowChange}
+              selectedRowId={selectedRowId}
+              onSelect={handleSelectRow}
+              renderRowTemplate={(row, index, handleFieldChange) => {
+                const currentModelData = models.find(m => m.id === row.selectedModelId)
+                const availableLabels = currentModelData?.label_set?.labels || []
+
+                return (
+                  <Box display="flex" flexDirection="row" alignItems="center" gap={1} width="100%">
+                    
+                    <Box display="flex" flexDirection="column" sx={{ flexGrow: 1 }}>
+                      {/* Model name — double-click to open dropdown */}
+                      {modelDropdownIndex === index ? (
+                        <FormControl size="small" sx={{ minWidth: 100 }} onClick={e => e.stopPropagation()}>
+                          <Select
+                            open
+                            value={row.selectedModelId}
+                            onChange={(e) => {
+                              handleFieldChange('selectedModelId', e.target.value)
+                              setModelDropdownIndex(null)
+                            }}
+                            onClose={() => setModelDropdownIndex(null)}
+                            variant="standard"
+                            sx={{ fontSize: '0.875rem', fontWeight: 500 }}
+                          >
+                            {models.map((model) => (
+                              <MenuItem key={model.id} value={model.id}>
+                                {model.name}
+                              </MenuItem>
+                            ))}
+                          </Select>
+                        </FormControl>
+                      ) : (
+                        <Typography
+                          variant="body2"
+                          fontWeight={500}
+                          onDoubleClick={(e) => {
+                            e.stopPropagation()
+                            setModelDropdownIndex(index)
+                          }}
+                          sx={{ minWidth: 60, cursor: 'text', px: 0.5, borderRadius: 0.5, '&:hover': { bgcolor: 'action.focus' } }}
+                        >
+                          {currentModelData?.name || 'No model'}
+                        </Typography>
+                      )}
+
+                      {/* Sublabel — double-click to edit inline */}
+                      {editingSublabelIndex === index ? (
+                        <TextField
+                          autoFocus
+                          size="small"
+                          variant="standard"
+                          value={sublabelDraft}
+                          onChange={(e) => setSublabelDraft(e.target.value)}
+                          onBlur={() => {
+                            handleFieldChange('rowSublabel', sublabelDraft)
+                            setEditingSublabelIndex(null)
+                          }}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              handleFieldChange('rowSublabel', sublabelDraft)
+                              setEditingSublabelIndex(null)
+                            }
+                            if (e.key === 'Escape') setEditingSublabelIndex(null)
+                          }}
+                          onClick={(e) => e.stopPropagation()}
+                          sx={{ maxWidth: 120 }}
+                        />
+                      ) : (
+                        <Typography
+                          variant="body2"
+                          color="text.secondary"
+                          onDoubleClick={(e) => {
+                            e.stopPropagation()
+                            setEditingSublabelIndex(index)
+                            setSublabelDraft(row.rowSublabel || '')
+                          }}
+                          sx={{ flexGrow: 1, cursor: 'text', px: 0.5, borderRadius: 0.5, '&:hover': { bgcolor: 'action.focus' } }}
+                        >
+                          {row.rowSublabel || 'sublabel...'}
+                        </Typography>
+                      )}
+                    </Box>
+                    {/* Settings button */}
+                    <IconButton
+                      size="small"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        setSettingsRowIndex(index)
+                        setSettingsAnchor(e.currentTarget)
+                      }}
+                    >
+                      <SettingsIcon fontSize="small" />
+                    </IconButton>
+
+                    {/* Settings popover */}
+                    {settingsRowIndex === index && (
+                      <Popover
+                        open={Boolean(settingsAnchor) && settingsRowIndex === index}
+                        anchorEl={settingsAnchor}
+                        onClose={() => { setSettingsAnchor(null); setSettingsRowIndex(null) }}
+                        anchorOrigin={{ vertical: 'bottom', horizontal: 'left' }}
+                        transformOrigin={{ vertical: 'top', horizontal: 'left' }}
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <Box sx={{ p: 2, display: 'flex', flexDirection: 'column', gap: 2, minWidth: 280 }}>
+                          <FormControl fullWidth size="small">
+                            <InputLabel>Model</InputLabel>
+                            <Select
+                              value={row.selectedModelId}
+                              label="Model"
+                              onChange={(e) => handleFieldChange('selectedModelId', e.target.value)}
+                            >
+                              {models.map((model) => (
+                                <MenuItem key={model.id} value={model.id}>
+                                  {model.name}
+                                </MenuItem>
+                              ))}
+                            </Select>
+                          </FormControl>
+                          <FormControl fullWidth size="small" disabled={!row.selectedModelId}>
+                            <InputLabel>Classes</InputLabel>
+                            <Select
+                              multiple
+                              value={row.selectedClasses}
+                              label="Classes"
+                              onChange={(e) => handleFieldChange('selectedClasses', e.target.value)}
+                              input={<OutlinedInput label="Classes" />}
+                              renderValue={(selected) => (
+                                <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
+                                  {selected.map((value) => {
+                                    const labelObj = availableLabels.find(l => l.name === value)
+                                    return (
+                                      <Chip
+                                        key={value}
+                                        label={value}
+                                        size="small"
+                                        style={{ backgroundColor: labelObj?.color, color: '#fff', fontWeight: 'bold' }}
+                                      />
+                                    )
+                                  })}
+                                </Box>
+                              )}
+                            >
+                              {availableLabels.map((label) => (
+                                <MenuItem key={label.name} value={label.name}>
+                                  {label.name}
+                                </MenuItem>
+                              ))}
+                            </Select>
+                          </FormControl>
+                          <TextField
+                            label="Sublabel"
+                            size="small"
+                            value={row.rowSublabel || ''}
+                            onChange={(e) => handleFieldChange('rowSublabel', e.target.value)}
+                          />
+                          <TextField
+                            label="Threshold (0-1)"
+                            type="number"
+                            size="small"
+                            inputProps={{ step: '0.1', min: '0', max: '1' }}
+                            value={row.rowThreshold}
+                            onChange={(e) => {
+                              let val = parseFloat(e.target.value)
+                              if (val > 1) val = 1
+                              if (val < 0) val = 0
+                              handleFieldChange('rowThreshold', isNaN(val) ? '' : val)
+                            }}
+                          />
+                          <TextField
+                            label="Cell Diameter"
+                            type="number"
+                            size="small"
+                            inputProps={{ step: '1' }}
+                            value={row.rowDiameter}
+                            onChange={(e) => {
+                              const val = parseInt(e.target.value, 10)
+                              handleFieldChange('rowDiameter', isNaN(val) ? '' : val)
+                            }}
+                          />
+                        </Box>
+                      </Popover>
+                    )}
+                  </Box>
+                )
+              }}
+            />
             <Typography gutterBottom variant='body1' sx={{ fontWeight: 'bold' }}>
               Manage Annotations
             </Typography>
@@ -1657,104 +1950,6 @@ export default function CellAnnotationTool() {
               <Box sx={{...modal_style, width: 800,}}>
                 <Typography variant="h5" gutterBottom>Detection Settings</Typography>
                 <Paper variant="outlined" sx={{ p: 3, mb: 4 }}>
-                  <RowMenu
-                    rows={detectionSettings}
-                    onAdd={handleAddRow}
-                    onDelete={handleDeleteRow}
-                    onChange={handleRowChange}
-                    headers={['Model', 'Classes', 'Threshold (0-1)', 'Cell Diameter', 'Label']}
-                    gridTemplateColumns={'2fr 2fr 1fr 1fr 2fr'}
-                    renderRowTemplate={(row, index, handleFieldChange) => {
-                      // Find the full model data matching this row's selected model ID
-                      const currentModelData = models.find(m => m.id === row.selectedModelId);
-                      // Safely grab available labels for this specific model, if it exists
-                      const availableLabels = currentModelData?.label_set?.labels || [];
-
-                      return (
-                        <Box display="grid" gridTemplateColumns="2fr 2fr 1fr 1fr 2fr" gap={2} width="100%">
-                          <FormControl fullWidth size="small">
-                            <InputLabel>Model</InputLabel>
-                            <Select
-                              value={row.selectedModelId}
-                              label="Model"
-                              onChange={(e) => handleFieldChange('selectedModelId', e.target.value)}
-                            >
-                              {models.map((model) => (
-                                <MenuItem key={model.id} value={model.id}>
-                                  {model.name}
-                                </MenuItem>
-                              ))}
-                            </Select>
-                          </FormControl>
-                          <FormControl fullWidth size="small" disabled={!row.selectedModelId}>
-                            <InputLabel>Classes</InputLabel>
-                            <Select
-                              multiple
-                              value={row.selectedClasses}
-                              label="Classes"
-                              onChange={(e) => handleFieldChange('selectedClasses', e.target.value)}
-                              input={<OutlinedInput label="Classes" />}
-                              renderValue={(selected) => (
-                                <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
-                                  {selected.map((value) => {
-                                    const labelObj = availableLabels.find(l => l.name === value);
-                                    return (
-                                      <Chip 
-                                        key={value} 
-                                        label={value} 
-                                        size="small"
-                                        style={{ backgroundColor: labelObj?.color, color: '#fff', fontWeight: 'bold' }} 
-                                      />
-                                    );
-                                  })}
-                                </Box>
-                              )}
-                            >
-                              {availableLabels.map((label) => (
-                                <MenuItem key={label.name} value={label.name}>
-                                  {label.name}
-                                </MenuItem>
-                              ))}
-                            </Select>
-                          </FormControl>
-                          <TextField
-                            label="Threshold (0-1)"
-                            type="number"
-                            size="small"
-                            inputProps={{ step: "0.1", min: "0", max: "1" }}
-                            value={row.rowThreshold}
-                            onChange={(e) => {
-                              let val = parseFloat(e.target.value);
-                              if (val > 1) val = 1;
-                              if (val < 0) val = 0;
-                              handleFieldChange('decimalValue', isNaN(val) ? '' : val);
-                            }}
-                          />
-                          <TextField
-                            label="Cell Diameter"
-                            type="number"
-                            size="small"
-                            inputProps={{ step: "1" }}
-                            value={row.rowDiameter}
-                            onChange={(e) => {
-                              const val = parseInt(e.target.value, 10);
-                              handleFieldChange('integerValue', isNaN(val) ? '' : val);
-                            }}
-                          />
-                          <TextField
-                            label="Sublabel"
-                            size="small"
-                            value={row.rowSublabel}
-                            onChange={(e) => {
-                              let val = e.target.value
-                              handleFieldChange('rowSublabel', val)
-                            }}
-                          />
-
-                        </Box>
-                      )
-                    }}
-                  />
                 </Paper>
               </Box>
             </Modal>
