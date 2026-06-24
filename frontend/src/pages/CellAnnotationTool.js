@@ -1,5 +1,5 @@
 import { useState, useEffect, Fragment } from 'react'
-import { Box, Button, Typography, Modal, IconButton, Checkbox, Popover, Paper, Select, FormControl, InputLabel, OutlinedInput, Chip } from '@mui/material'
+import { Box, Button, Typography, Divider, Modal, IconButton, FormControlLabel, Checkbox, Popover, Paper, Select, FormControl, InputLabel, OutlinedInput, Chip } from '@mui/material'
 import PopupState, { bindTrigger, bindMenu } from 'material-ui-popup-state'
 import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown'
 import Menu from '@mui/material/Menu'
@@ -8,6 +8,9 @@ import Stack from '@mui/material/Stack'
 import TextField from '@mui/material/TextField'
 import DownloadIcon from '@mui/icons-material/Download'
 import SettingsIcon from '@mui/icons-material/Settings'
+import AddIcon from '@mui/icons-material/Add'
+import DeleteIcon from '@mui/icons-material/Delete'
+import CloseIcon from '@mui/icons-material/Close'
 import Tooltip from '@mui/material/Tooltip'
 import CircularProgress from '@mui/material/CircularProgress'
 import AppBar from '@mui/material/AppBar'
@@ -36,6 +39,7 @@ export default function CellAnnotationTool() {
 
   // State for image operations
   const [imageList, setImageList] = useState([])
+  const [imageSets, setImageSets] = useState([])
   const [imageID, setImageID] = useState('')
   const [imageURL, setImageURL] = useState('')
   const [imageName, setImageName] = useState('')
@@ -108,6 +112,7 @@ export default function CellAnnotationTool() {
 
     loadImages()
     loadModels()
+    loadImageSets()
   }, [isAuthReady])
 
   useEffect(() => {
@@ -205,6 +210,16 @@ export default function CellAnnotationTool() {
     })
   }
 
+  async function loadImageSets() {
+    fetch(`${API_BASE_URL}/user-image-sets`, { credentials: 'include' })
+      .then((res) => {
+        if (!res.ok) throw new Error("Failed to load sets");
+        return res.json();
+      })
+      .then((data) => setImageSets(data))
+      .catch((err) => console.error("Error fetching image sets:", err));
+  }
+
   // *----------* User Operations *----------* \\
 
   async function handleRegister() {
@@ -250,6 +265,7 @@ export default function CellAnnotationTool() {
       initializeSession()
       loadImages()
       loadModels()
+      loadImageSets()
       
     } catch (err) {
       console.error('Login failed:', err.message)
@@ -259,42 +275,110 @@ export default function CellAnnotationTool() {
   
   // *----------* Image Operations *----------* \\
 
-  // Uploads the users chosen image to the server and renders it to the canvas
+  // Uploads multiple chosen images to the server and handles optional ImageSet nesting
   async function handleUpload(e) {
-    const file = e.target.files[0]
-    e.target.value = null
-    if (!file) return
+    const files = Array.from(e.target.files || [])
+    e.target.value = null // Reset picker input instantly
+    if (files.length === 0) return
 
-    if (!file.name.toLowerCase().endsWith('.tiff') && !file.name.toLowerCase().endsWith('.tif')) {
-        alert('Only .tiff and .tif files are accepted.')
-        e.target.value = ''
-        return
+    // Validate that every file matches your required extensions
+    const invalidFiles = files.filter(file => !file.name.toLowerCase().endsWith('.tiff') && !file.name.toLowerCase().endsWith('.tif'))
+    if (invalidFiles.length > 0) {
+      alert('Only .tiff and .tif files are accepted. Please clear non-TIFF files from your selection.')
+      return
     }
 
-    setImageName(file.name)
+    // Check if user wants to group these uploads into a brand new Image Set
+    const autoCreateCheckbox = document.getElementById('auto-create-set-checkbox')
+    let targetSetId = null
+    let targetSetName = ""
 
-    const formData = new FormData()
-    formData.append('file', file)
+    if (autoCreateCheckbox && autoCreateCheckbox.checked) {
+      const setName = prompt(`Enter a name for the new image set containing these ${files.length} images:`)
+      if (!setName) {
+        // If they hit cancel, abort the entire process or leave checkbox unchecked
+        return
+      }
+      
+      // Create the image set first so we have an ID to associate files with
+      try {
+        setIsLoading(true)
+        const setRes = await fetch(`${API_BASE_URL}/create-image-set`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ name: setName })
+        })
+        if (!setRes.ok) throw new Error('Failed to create destination image set')
+        const createdSet = await setRes.json()
+        targetSetId = createdSet.id
+        targetSetName = createdSet.name
+      } catch (err) {
+        alert('Upload cancelled: ' + err.message)
+        setIsLoading(false)
+        return
+      }
+    }
 
     setIsLoading(true)
+    let firstUploadedImageData = null
+
     try {
+      // Process files sequentially to ensure the backend DB logs entries cleanly
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i]
+        const formData = new FormData()
+        formData.append('file', file)
+
         const res = await fetch(`${API_BASE_URL}/upload`, {
           method: 'POST',
           body: formData,
           credentials: 'include',
         })
 
-        if (!res.ok) throw new Error('Upload failed')
+        if (!res.ok) throw new Error(`Upload failed for file: ${file.name}`)
         const data = await res.json()
-        setImageID(data.image_id)
-        setImageURL(`${API_BASE_URL}${data.converted_url}`)
-        setImageSize({width: data.dimensions[0], height: data.dimensions[1]})
+
+        // Track the first image metadata to load onto the main interactive canvas
+        if (i === 0) {
+          firstUploadedImageData = data
+          setImageName(file.name)
+        }
+
+        // If grouping into a set, bind this newly uploaded image to the album link table
+        if (targetSetId) {
+          await fetch(`${API_BASE_URL}/add-image-to-set`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'include',
+            body: JSON.stringify({ image_set_id: targetSetId, image_id: data.image_id })
+          })
+        }
+      }
+
+      // Now update canvas state with the first uploaded image in the batch
+      if (firstUploadedImageData) {
+        setImageID(firstUploadedImageData.image_id)
+        setImageURL(`${API_BASE_URL}${firstUploadedImageData.converted_url}`)
+        setImageSize({
+          width: firstUploadedImageData.dimensions[0], 
+          height: firstUploadedImageData.dimensions[1]
+        })
         setAnnotations([])
-    } catch(e) {
-      alert('Upload failed: ' + (e.response?.data?.error || e.message))
+      }
+
+      if (targetSetId) {
+        alert(`Successfully uploaded ${files.length} images and grouped them into set "${targetSetName}"!`)
+      }
+
+    } catch (err) {
+      alert('Upload process encountered an error: ' + err.message)
     } finally {
+      // Synchronize your component state caches
       loadImages()
+      loadImageSets() // Syncs the new album row if it was made
       setIsLoading(false)
+      if (autoCreateCheckbox) autoCreateCheckbox.checked = false // Uncheck box for next time
     }
   }
 
@@ -498,8 +582,8 @@ export default function CellAnnotationTool() {
     }
     // TODO: Handle annotations
 
-    if (galleryMenuOpen) {
-      setGalleryMenuOpen(false)
+    if (openImageMenuOpen) {
+      setOpenImageMenuOpen(false)
     }
   }
 
@@ -529,13 +613,101 @@ export default function CellAnnotationTool() {
     }
   }
 
-  // const handleBrightnessChange = (event, newValue) => {
-  //   setBrightness(newValue)
-  // }
 
-  // const handleContrastChange = (event, newValue) => {
-  //   setContrast(newValue)
-  // }
+  // *----------* Image Set Operations *----------* \\
+  
+  async function handleCreateImageSet() {
+    const setName = prompt("Enter a name for the new image set:");
+    if (!setName) return // Cancel if empty
+
+    fetch(`${API_BASE_URL}/create-image-set`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+      body: JSON.stringify({ name: setName }),
+    })
+      .then((res) => res.json())
+      .then((newSet) => {
+        // Append the newly created set into our local array state
+        setImageSets((prev) => [...prev, newSet])
+      })
+      .catch((err) => console.error("Error creating image set:", err))
+  }
+
+  async function handleDeleteImageSet(index) {
+    const targetSet = imageSets[index]
+    if (!targetSet) return;
+
+    if (!window.confirm(`Are you sure you want to delete "${targetSet.name}"?`)) return
+
+    fetch(`${API_BASE_URL}/delete-image-set`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+      body: JSON.stringify({ image_set_id: targetSet.id }),
+    })
+      .then((res) => {
+        if (res.ok) {
+          // Splice out the deleted item from state
+          setImageSets((prev) => prev.filter((_, idx) => idx !== index))
+        }
+      })
+      .catch((err) => console.error("Error deleting image set:", err))
+  }
+
+  // Remove an image from the active set
+  async function handleRemoveImageFromSet(imageId) {
+    if (!activeImageSet) return
+
+    fetch(`${API_BASE_URL}/remove-image-from-set`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ image_set_id: activeImageSet.id, image_id: imageId })
+    })
+      .then(res => {
+        if (res.ok) {
+          // Dynamic update: filter out the image locally from our active state instance
+          setActiveImageSet(prev => ({
+            ...prev,
+            images: prev.images.filter(img => img.id !== imageId)
+          }))
+          // Sync parent image-set count list
+          loadImageSets()
+        }
+      })
+      .catch(err => console.error("Error removing image from set:", err))
+  }
+
+  // Add an image to the active set
+  async function handleAddImageToSet(img) {
+    if (!activeImageSet) return
+
+    fetch(`${API_BASE_URL}/add-image-to-set`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ image_set_id: activeImageSet.id, image_id: img.id })
+    })
+      .then(res => {
+        if (res.ok) {
+          // Append image to our active sub-view state if it's not already tracked
+          setActiveImageSet(prev => {
+            const currentImages = prev.images || []
+            
+            if (currentImages.some(existing => existing.id === img.id)) return prev
+            return {
+              ...prev,
+              images: [...currentImages, img]
+            }
+})
+          // Sync parent list counts
+          loadImageSets()
+        }
+      })
+      .catch(err => console.error("Error adding image to set:", err))
+  }
+
 
   // *----------* Annotation Operations *----------* \\
 
@@ -1363,7 +1535,7 @@ export default function CellAnnotationTool() {
     }
   }
 
-  // *----------* Tab Menu Contents *----------* \\
+  // *----------* Modal Helpers *----------* \\
 
 
   // Custom model upload modal state
@@ -1422,8 +1594,21 @@ export default function CellAnnotationTool() {
   // Calibrator
   const [calibratorOpen, setCalibratorOpen] = useState(false)
 
-  const [galleryMenuOpen, setGalleryMenuOpen] = useState(false)
-
+  const [openImageMenuOpen, setOpenImageMenuOpen] = useState(false)
+  const [imageSetsMenuOpen, setImageSetsMenuOpen] = useState(false)
+  const [activeImageSet, setActiveImageSet] = useState(null)
+  const [setViewMenuOpen, setSetViewMenuOpen] = useState(false)
+  const [addImagesSelectionOpen, setAddImagesSelectionOpen] = useState(false)
+  async function handleSelectImageSet(setId) {
+    const chosenSet = imageSets.find(s => s.id === setId)
+    if (!chosenSet) return
+    
+    // Cache the current active set context
+    setActiveImageSet(chosenSet)
+    
+    // Open the new image set sub-gallery menu
+    setSetViewMenuOpen(true)
+  }
   const [annotationModalOpen, setAnnotationModalOpen] = useState(false)
   // const [images] = useState([
   //   { url: 'https://picsum.photos/200/300?random=1', id: 1 },
@@ -2196,19 +2381,186 @@ export default function CellAnnotationTool() {
               Cell Annotation Tool (CAT🐱)
           </Typography>
           <Button variant='contained' component='label' sx={{...button_style_span}}>
-            Upload Image
-            <input hidden type='file' accept='image/tiff' onChange={handleUpload}/>
+            Upload Images
+            <input hidden type='file' accept='image/tiff' multiple onChange={handleUpload}/>
           </Button>
-          <Button variant='contained' component='label' onClick={() => setGalleryMenuOpen(true)} sx={{...button_style_span}}>
+          <FormControlLabel
+            control={
+              <Checkbox 
+                id="auto-create-set-checkbox"
+                size="small"
+                sx={{ color: 'text.secondary' }}
+              />
+            }
+            label={<Typography variant="body2" color="text.secondary">Create image set from uploads</Typography>}
+          />
+          <Button 
+            variant='contained' 
+            onClick={() => setOpenImageMenuOpen(true)} 
+            sx={{...button_style_span}}
+          >
             Open Image
           </Button>
+
           <GalleryMenu 
-            open={galleryMenuOpen}
-            handleClose={() => setGalleryMenuOpen(false)}
+            open={openImageMenuOpen}
+            handleClose={() => setOpenImageMenuOpen(false)}
             images={imageList}
             onImageClick={handleLoadImage}
-            onButtonClick={handleDeleteImage}
+            
+            // Pass the buttons in dynamically here
+            renderActions={(img) => (
+              <>
+                <IconButton 
+                  size="small" 
+                  sx={{ color: '#fff', '&:hover': { color: '#e0e0e0' } }}
+                  onClick={(e) => {
+                    e.stopPropagation(); // Prevents clicking the button from triggering onImageClick
+                    console.log("Settings clicked for image:", img.id);
+                  }}
+                >
+                  <SettingsIcon fontSize="small" />
+                </IconButton>
+                
+                <IconButton 
+                  size="small" 
+                  sx={{ color: '#F87171', '&:hover': { color: '#EF4444' } }} // Red accent colors
+                  onClick={(e) => {
+                    e.stopPropagation(); // Crucial to avoid loading the image while deleting it!
+                    handleDeleteImage(img.id);
+                  }}
+                >
+                  <DeleteIcon fontSize="small" />
+                </IconButton>
+              </>
+            )}
           />
+          <Button 
+            variant="contained" 
+            onClick={() => setImageSetsMenuOpen(true)} 
+            sx={{ ...button_style_span }}
+          >
+            Manage Image Sets
+          </Button>
+          <Modal
+            open={imageSetsMenuOpen}
+            onClose={() => setImageSetsMenuOpen(false)}
+            aria-labelledby="image-sets-modal-title"
+            sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+          >
+            <Box
+              sx={{
+                position: 'relative',
+                width: '100%',
+                maxWidth: 550,
+                bgcolor: 'background.paper',
+                borderRadius: 2,
+                boxShadow: 24,
+                p: 3,
+                outline: 'none',
+                maxHeight: '85vh',
+                overflowY: 'auto'
+              }}
+            >
+              {/* Modal Header */}
+              <Box display="flex" justifyContent="space-between" alignItems="center" sx={{ mb: 2 }}>
+                <Typography id="image-sets-modal-title" variant="h6" sx={{ fontWeight: 'bold' }}>
+                  Manage Image Sets
+                </Typography>
+                <IconButton onClick={() => setImageSetsMenuOpen(false)} size="small">
+                  <CloseIcon />
+                </IconButton>
+              </Box>
+
+              <Divider sx={{ mb: 2 }} />
+
+              {/* Content Window containing RowMenu */}
+              <RowMenu 
+                rows={imageSets}
+                headers={["Set Name", "Total Images"]}
+                gridTemplateColumns="3fr 1fr"
+                onAdd={handleCreateImageSet}
+                onDelete={handleDeleteImageSet}
+                onChange={() => {}}
+                onSelect={handleSelectImageSet}
+                renderRowTemplate={(row) => (
+                  <Box display="grid" gridTemplateColumns="3fr 1fr" gap={2} alignItems="center">
+                    <Typography variant="body1" sx={{ fontWeight: 500, minWidth: 0, noWrap: true }}>
+                      {row.name}
+                    </Typography>
+                    <Typography variant="body2" color="text.secondary">
+                      {row.image_count} items
+                    </Typography>
+                  </Box>
+                )}
+              />
+              <GalleryMenu 
+                open={setViewMenuOpen}
+                handleClose={() => setSetViewMenuOpen(false)}
+                title={activeImageSet ? `Image Set: ${activeImageSet.name}` : 'Image Set Gallery'}
+                images={activeImageSet?.images || []}
+                onImageClick={handleLoadImage} // Clicking standard image still loads canvas layout
+                
+                // 1. Render custom "Add Images" button in the header bar
+                renderHeaderActions={() => (
+                  <Button
+                    variant="outlined"
+                    size="small"
+                    startIcon={<AddIcon />}
+                    onClick={() => setAddImagesSelectionOpen(true)}
+                  >
+                    Add Images
+                  </Button>
+                )}
+
+                // 2. Render actions overlay for images currently inside the set (Trash Can)
+                renderActions={(img) => (
+                  <IconButton 
+                    size="small" 
+                    sx={{ color: '#F87171', '&:hover': { color: '#EF4444' } }}
+                    onClick={(e) => {
+                      e.stopPropagation() 
+                      handleRemoveImageFromSet(img.id)
+                    }}
+                  >
+                    <DeleteIcon fontSize="small" />
+                  </IconButton>
+                )}
+              />
+              <GalleryMenu
+                open={addImagesSelectionOpen}
+                handleClose={() => setAddImagesSelectionOpen(false)}
+                title="Select Images to Add to Set"
+                images={imageList} // Displays every image uploaded globally by the user
+                onImageClick={(img) => {
+                  handleAddImageToSet(img)
+                }}
+              
+                renderActions={(img) => {
+                  // Add optional chaining and fallback array here too
+                  const currentImages = activeImageSet?.images || []
+                  const isAlreadyInSet = currentImages.some(item => item.id === img.id)
+                  
+                  return isAlreadyInSet ? (
+                    <Typography variant="caption" sx={{ color: '#4ADE80', px: 1, fontWeight: 'bold' }}>
+                      Added
+                    </Typography>
+                  ) : (
+                    <IconButton 
+                      size="small" 
+                      sx={{ color: '#60A5FA', '&:hover': { color: '#3B82F6' } }}
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        handleAddImageToSet(img)
+                      }}
+                    >
+                      <AddIcon fontSize="small" />
+                    </IconButton>
+                  )
+                }}
+              />
+            </Box>
+          </Modal>
           <Button variant='contained' component='label' onClick={handleSave} sx={{...button_style_span}}>
             Save Image
           </Button>

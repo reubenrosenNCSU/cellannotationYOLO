@@ -46,7 +46,7 @@ app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(hours=24)  # Session expires after 24 hours
 
 from database import db
-from models import User, ImageRecord, Annotation, LabelSet, Weights
+from models import User, ImageRecord, ImageSet, Annotation, LabelSet, Weights
 
 db.init_app(app)
 
@@ -547,6 +547,7 @@ def save_color():
         return jsonify({"error": "Internal server error"}), 500
 
 
+
 # *----------* Data Download Endpoints *----------* #
     
 @app.route('/export-annotations', methods=['POST'])
@@ -595,6 +596,7 @@ def export_annotations():
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
 
 @app.route('/upload-cropped', methods=['POST'])
 def upload_cropped_file():
@@ -665,6 +667,7 @@ def upload_cropped_file():
             os.remove(temp_crop_path)
 
 
+
 # *----------* Data Retrieval Endpoints *----------* #
 
 @app.route('/user-images', methods=['GET'])
@@ -698,6 +701,24 @@ def get_user_weights():
     ).all()
 
     return jsonify([wts.to_dict() for wts in weights])
+
+
+@app.route('/user-image-sets', methods=['GET'])
+def get_user_image_sets():
+    if not g.user:
+        return jsonify({"error": "No active session"}), 401
+    
+    image_sets = ImageSet.query.filter_by(user_id=g.user.id).all()
+    
+    results = []
+    for img_set in image_sets:
+        set_data = img_set.to_dict()
+        # Prepend the API base URL to all inner image URLs
+        for img in set_data['images']:
+            img['url'] = f"{request.host_url.rstrip('/')}{img['url']}"
+        results.append(set_data)
+        
+    return jsonify(results), 200
 
 
 @app.route('/load-annotations', methods=['POST'])
@@ -735,6 +756,7 @@ def load_annotations():
         })
 
     return jsonify({"annotations": results}), 200
+
 
 
 # *----------* Data Removal Endpoints *----------* #
@@ -842,6 +864,139 @@ def clear_annotations():
         return jsonify({"error": "Internal server error occurred during annotation sweep"}), 500
 
 
+
+# *----------* Image Set Endpoints *----------* #
+
+@app.route('/create-image-set', methods=['POST'])
+def create_image_set():
+    if not g.user:
+        return jsonify({"error": "No active session"}), 401
+
+    data = request.get_json()
+    if not data or 'name' not in data:
+        return jsonify({"error": "Missing 'name' in request body"}), 400
+
+    try:
+        new_set = ImageSet(
+            id=str(uuid.uuid4()),
+            user_id=g.user.id,
+            name=data['name'],
+            description=data.get('description')  # Optional field
+        )
+        db.session.add(new_set)
+        db.session.commit()
+
+        # Note: The directory 'data/<user_id>/imagesets/<id>' is automatically 
+        # created here via the SQLAlchemy 'after_insert' event hook.
+
+        return jsonify(new_set.to_dict()), 201
+
+    except Exception as e:
+        db.session.rollback()
+        print(f"Error creating image set: {str(e)}")
+        return jsonify({"error": f"Server error: {str(e)}"}), 500
+
+
+@app.route('/delete-image-set', methods=['POST'])
+def delete_image_set():
+    if not g.user:
+        return jsonify({"error": "No active session"}), 401
+
+    data = request.get_json()
+    if not data or 'image_set_id' not in data:
+        return jsonify({"error": "Missing 'image_set_id' in request body"}), 400
+
+    try:
+        image_set = ImageSet.query.filter_by(id=data['image_set_id'], user_id=g.user.id).first()
+        if not image_set:
+            return jsonify({"error": "Image set not found or unauthorized"}), 404
+
+        db.session.delete(image_set)
+        db.session.commit()
+
+        # Note: The physical folder is automatically deleted via the 'after_delete' hook.
+
+        return jsonify({"message": "Image set deleted successfully"}), 200
+
+    except Exception as e:
+        db.session.rollback()
+        print(f"Error deleting image set: {str(e)}")
+        return jsonify({"error": f"Server error: {str(e)}"}), 500
+
+
+@app.route('/add-image-to-set', methods=['POST'])
+def add_image_to_set():
+    if not g.user:
+        return jsonify({"error": "No active session"}), 401
+
+    data = request.get_json()
+    if not data or 'image_set_id' not in data or 'image_id' not in data:
+        return jsonify({"error": "Missing 'image_set_id' or 'image_id' in request body"}), 400
+
+    try:
+        # Step 1: Query both items ensuring ownership boundaries are respected
+        image_set = ImageSet.query.filter_by(id=data['image_set_id'], user_id=g.user.id).first()
+        image_record = ImageRecord.query.filter_by(id=data['image_id'], user_id=g.user.id).first()
+
+        if not image_set or not image_record:
+            return jsonify({"error": "Image set or Image record not found or unauthorized"}), 404
+
+        # Step 2: Avoid duplicates before attempting insertion
+        if image_record in image_set.images:
+            return jsonify({"message": "Image already exists in this set"}), 200
+
+        # Step 3: Append to the secondary relationship link table
+        image_set.images.append(image_record)
+        db.session.commit()
+
+        return jsonify({
+            "message": "Image added to set successfully",
+            "image_set_id": image_set.id,
+            "image_count": len(image_set.images)
+        }), 200
+
+    except Exception as e:
+        db.session.rollback()
+        print(f"Error adding image to set: {str(e)}")
+        return jsonify({"error": f"Server error: {str(e)}"}), 500
+
+
+@app.route('/remove-image-from-set', methods=['POST'])
+def remove_image_from_set():
+    if not g.user:
+        return jsonify({"error": "No active session"}), 401
+
+    data = request.get_json()
+    if not data or 'image_set_id' not in data or 'image_id' not in data:
+        return jsonify({"error": "Missing 'image_set_id' or 'image_id' in request body"}), 400
+
+    try:
+        image_set = ImageSet.query.filter_by(id=data['image_set_id'], user_id=g.user.id).first()
+        image_record = ImageRecord.query.filter_by(id=data['image_id'], user_id=g.user.id).first()
+
+        if not image_set or not image_record:
+            return jsonify({"error": "Image set or Image record not found or unauthorized"}), 404
+
+        # Step 2: Verify the relation exists before removal
+        if image_record not in image_set.images:
+            return jsonify({"error": "Image is not a member of this set"}), 400
+
+        # Step 3: Sever relation link
+        image_set.images.remove(image_record)
+        db.session.commit()
+
+        return jsonify({
+            "message": "Image removed from set successfully",
+            "image_set_id": image_set.id,
+            "image_count": len(image_set.images)
+        }), 200
+
+    except Exception as e:
+        db.session.rollback()
+        print(f"Error removing image from set: {str(e)}")
+        return jsonify({"error": f"Server error: {str(e)}"}), 500
+
+        
 
 # *----------* Model Endpoints *----------* #
 
@@ -969,7 +1124,6 @@ def detect():
         target_record.annotations_detected = converted_annotations
         target_record.count_detected = len(converted_annotations)
         
-        from sqlalchemy.orm.attributes import flag_modified
         flag_modified(target_record, "annotations_detected")
         
         db.session.commit()
@@ -994,6 +1148,129 @@ def detect():
         return jsonify({'error': str(e), 'traceback': error_details}), 500
 
 
+
+# *----------* Fine Tune Endpoints *----------* #
+
+import yaml
+
+@app.route('/prepare-training-set', methods=['POST'])
+def prepare_training_set():
+    if not g.user:
+        return jsonify({"error": "No active session"}), 401
+
+    data = request.get_json()
+    # Expecting: image_set_id, target_weights_id, and an explicit list of chosen annotation row IDs
+    if not data or 'image_set_id' not in data or 'target_weights_id' not in data or 'selected_annotation_ids' not in data:
+        return jsonify({"error": "Missing required parameters"}), 400
+
+    set_id = data['image_set_id']
+    target_weights_id = data['target_weights_id']
+    selected_ids = data['selected_annotation_ids'] # Array of annotation string UUIDs
+
+    try:
+        # 1. Fetch and secure the root records
+        image_set = ImageSet.query.filter_by(id=set_id, user_id=g.user.id).first()
+        weights_record = Weights.query.filter_by(id=target_weights_id).first()
+
+        if not image_set or not weights_record:
+            return jsonify({"error": "ImageSet or Weights not found"}), 404
+
+        base_set_path = os.path.join('data', g.user.id, 'imagesets', set_id)
+        images_dir = os.path.join(base_set_path, 'images')
+        labels_dir = os.path.join(base_set_path, 'labels')
+
+        # Clear existing workspace inside the image set to avoid phantom files from prior runs
+        import shutil
+        for folder in [images_dir, labels_dir]:
+            if os.path.exists(folder):
+                shutil.rmtree(folder)
+            os.makedirs(folder, exist_ok=True)
+
+        # 2. Batch fetch ALL selected annotations that belong to this user
+        # This keeps database round-trips to an absolute minimum
+        allowed_annotations = Annotation.query.filter(
+            Annotation.id.in_(selected_ids),
+            Annotation.user_id == g.user.id
+        ).all()
+
+        # Group annotations by image_id for fast lookup during our loop
+        annotations_by_image = {}
+        for ann in allowed_annotations:
+            # STRICT BACKEND GUARDRAIL:
+            # If the user somehow bypassed the frontend and sent an annotation 
+            # belonging to a different model, reject it immediately!
+            if ann.weights_id != target_weights_id:
+                return jsonify({"error": f"Security violation: Annotation {ann.id} does not match target model."}), 400
+                
+            if ann.image_id not in annotations_by_image:
+                annotations_by_image[ann.image_id] = []
+            annotations_by_image[ann.image_id].append(ann)
+
+        # 3. Step through the album images and build the YOLO layout
+        for image_record in image_set.images:
+            
+            # --- Setup Image Link ---
+            src_image_path = os.path.join('data', image_record.normalized+path)
+            image_filename = f"{image_record.id}.png"
+            dst_image_path = os.path.join(images_dir, image_filename)
+
+            if not os.path.exists(dst_image_path):
+                relative_src = os.path.relpath(src_image_path, start=images_dir)
+                os.symlink(relative_src, dst_image_path)
+
+            # --- Fabricate Combined Annotation File ---
+            annotation_filename = f"{image_record.id}.txt"
+            dst_annotation_path = os.path.join(labels_dir, annotation_filename)
+            
+            combined_yolo_lines = []
+            
+            # Pull only the annotations selected by the user for this specific image
+            image_annotations = annotations_by_image.get(image_record.id, [])
+
+            for ann in image_annotations:
+                # Merge manually drawn and AI detected boxes together
+                all_boxes = ann.annotations_drawn + ann.annotations_detected
+                for box in all_boxes:
+                    combined_yolo_lines.append("{0} {1:.6f} {2:.6f} {3:.6f} {4:.6f}".format(
+                        box['class'], box['x'], box['y'], box['w'], box['h']
+                    ))
+
+            # YOLO demands a blank text file even if an image has zero positive detections
+            with open(dst_annotation_path, 'w') as f:
+                f.write("\n".join(combined_yolo_lines))
+
+        # 4. Generate the dataset.yaml file inside the imageset directory
+        class_names = [label['name'] for label in weights_record.label_set.labels]
+        dataset_yaml_content = {
+            'path': os.path.abspath(base_set_path), # Absolute path makes tracking easier for local runs
+            'train': 'images',
+            'val': 'images', 
+            'nc': len(class_names),
+            'names': class_names
+        }
+        
+        yaml_path = os.path.join(base_set_path, 'dataset.yaml')
+        with open(yaml_path, 'w') as f:
+            yaml.dump(dataset_yaml_content, f, default_flow_style=False)
+
+        # Lock the target weights to this image set record
+        image_set.target_weights_id = target_weights_id
+        db.session.commit()
+
+        return jsonify({
+            "message": "Dataset preparation complete. Ready for fine-tuning.",
+            "image_set_id": set_id,
+            "total_images": len(image_set.images)
+        }), 200
+
+    except Exception as e:
+        db.session.rollback()
+        print(f"Error compiling fine-tune dataset: {str(e)}")
+        return jsonify({"error": f"Server error: {str(e)}"}), 500
+
+
+
+# *----------* OLD Endpoints *----------* #
 
 @app.route('/preview-tiff', methods=['POST']) #TODO: Remove
 def preview_tiff():

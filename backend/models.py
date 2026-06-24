@@ -11,7 +11,9 @@ class User(db.Model):
     annotations = db.relationship('Annotation', cascade='all, delete-orphan', backref='user')
     label_sets = db.relationship('LabelSet', cascade='all, delete-orphan', backref='user')
     weights = db.relationship('Weights', cascade='all, delete-orphan', backref='user')
-    
+    # Add this inside class User(db.Model):
+    image_sets = db.relationship('ImageSet', cascade='all, delete-orphan', backref='user')
+
     def setup_filesystem(self):
         '''Creates the persistent directory structure for a new user.'''
         base_path = os.path.join('data', self.id)
@@ -23,7 +25,7 @@ class User(db.Model):
             'images/cropped',
             'annotations',
             'models',
-            'trainingsets',
+            'imagesets',
             'runs'
         ]
         
@@ -153,3 +155,70 @@ class Weights(db.Model):
             'name': self.name,
             'label_set': self.label_set.to_dict() if self.label_set else None
         }
+
+
+
+# Association table for the Many-to-Many relationship
+imageset_image_link = db.Table(
+    'imageset_image_link',
+    db.Column('image_set_id', db.String(36), db.ForeignKey('image_set.id', ondelete='CASCADE'), primary_key=True),
+    db.Column('image_record_id', db.String(36), db.ForeignKey('image_record.id', ondelete='CASCADE'), primary_key=True)
+)
+
+class ImageSet(db.Model):
+    __tablename__ = 'image_set'
+    
+    id = db.Column(db.String(36), primary_key=True)
+    user_id = db.Column(db.String(36), db.ForeignKey('user.id', ondelete='CASCADE'), nullable=False)
+    name = db.Column(db.String(100), nullable=False)
+    description = db.Column(db.String(512), nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.datetime.utcnow)
+
+    # Many-to-Many relationship back to ImageRecord
+    images = db.relationship(
+        'ImageRecord', 
+        secondary=imageset_image_link, 
+        lazy='subquery',
+        backref=db.backref('image_sets', lazy='dynamic')
+    )
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'name': self.name,
+            'description': self.description,
+            'created_at': self.created_at.isoformat(),
+            'image_count': len(self.images),
+            'images': [
+                {
+                    'id': img.id,
+                    'url': f"/static/{img.normalized_path}",
+                    'name': f'{img.original_filename}{img.original_extension}',
+                    'dimensions': [img.width, img.height],
+                    'p_low': img.p_low,
+                    'p_high': img.p_high
+                }
+                for img in self.images
+            ]
+        }
+
+
+from sqlalchemy import event
+
+@event.listens_for(ImageSet, 'after_insert')
+def create_imageset_directory(mapper, connection, target):
+    """Automatically builds the physical folder when an ImageSet is created."""
+    # target matches the current ImageSet instance
+    folder_path = os.path.join('data', target.user_id, 'imagesets', target.id)
+    os.makedirs(folder_path, exist_ok=True)
+    print(f"Created filesystem directory for ImageSet: {folder_path}")
+
+
+@event.listens_for(ImageSet, 'after_delete')
+def delete_imageset_directory(mapper, connection, target):
+    """Cleans up the physical folder when an ImageSet is deleted."""
+    folder_path = os.path.join('data', target.user_id, 'imagesets', target.id)
+    if os.path.exists(folder_path):
+        import shutil
+        shutil.rmtree(folder_path)
+        print(f"Removed filesystem directory for ImageSet: {folder_path}")
