@@ -558,6 +558,7 @@ export default function CellAnnotationTool() {
       is_detected: false,
       name: classLabel.name,
       color: classLabel.color,
+      sublabel: selectedRow.sublabel
     }
 
     // Add to boxes for canvas rendering
