@@ -11,6 +11,19 @@ import SettingsIcon from '@mui/icons-material/Settings'
 import AddIcon from '@mui/icons-material/Add'
 import DeleteIcon from '@mui/icons-material/Delete'
 import CloseIcon from '@mui/icons-material/Close'
+import FolderOpenIcon from '@mui/icons-material/FolderOpen'
+import CloudUploadIcon from '@mui/icons-material/CloudUpload'
+import CollectionsIcon from '@mui/icons-material/Collections'
+import SaveAsIcon from '@mui/icons-material/SaveAs'
+import FileDownloadIcon from '@mui/icons-material/FileDownload'
+import FileUploadIcon from '@mui/icons-material/FileUpload'
+import DeleteSweepIcon from '@mui/icons-material/DeleteSweep'
+import DriveFolderUploadIcon from '@mui/icons-material/DriveFolderUpload';
+import WarningAmberIcon from '@mui/icons-material/WarningAmber'
+import VisibilityIcon from '@mui/icons-material/Visibility'
+import VisibilityOffIcon from '@mui/icons-material/VisibilityOff'
+import SaveIcon from '@mui/icons-material/Save'
+import CropIcon from '@mui/icons-material/Crop'
 import Tooltip from '@mui/material/Tooltip'
 import CircularProgress from '@mui/material/CircularProgress'
 import AppBar from '@mui/material/AppBar'
@@ -275,7 +288,7 @@ export default function CellAnnotationTool() {
   
   // *----------* Image Operations *----------* \\
 
-  // Uploads multiple chosen images to the server and handles optional ImageSet nesting
+  // Uploads multiple chosen images to the server and prompts for sequential ImageSet nesting
   async function handleUpload(e) {
     const files = Array.from(e.target.files || [])
     e.target.value = null // Reset picker input instantly
@@ -288,35 +301,38 @@ export default function CellAnnotationTool() {
       return
     }
 
-    // Check if user wants to group these uploads into a brand new Image Set
-    const autoCreateCheckbox = document.getElementById('auto-create-set-checkbox')
     let targetSetId = null
     let targetSetName = ""
 
-    if (autoCreateCheckbox && autoCreateCheckbox.checked) {
-      const setName = prompt(`Enter a name for the new image set containing these ${files.length} images:`)
-      if (!setName) {
-        // If they hit cancel, abort the entire process or leave checkbox unchecked
-        return
-      }
+    // Automatically trigger prompt if multiple files are selected at once
+    if (files.length > 1) {
+      const shouldCreateSet = window.confirm(`You are uploading ${files.length} images. Would you like to automatically create a new image set for them?`)
       
-      // Create the image set first so we have an ID to associate files with
-      try {
-        setIsLoading(true)
-        const setRes = await fetch(`${API_BASE_URL}/create-image-set`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          credentials: 'include',
-          body: JSON.stringify({ name: setName })
-        })
-        if (!setRes.ok) throw new Error('Failed to create destination image set')
-        const createdSet = await setRes.json()
-        targetSetId = createdSet.id
-        targetSetName = createdSet.name
-      } catch (err) {
-        alert('Upload cancelled: ' + err.message)
-        setIsLoading(false)
-        return
+      if (shouldCreateSet) {
+        const setName = prompt("Enter a name for the new image set:")
+        if (!setName) {
+          // If they click cancel or hit enter with nothing, abort the whole upload to prevent accidental drift
+          return
+        }
+
+        // Create the image set first so we have an ID to associate files with
+        try {
+          setIsLoading(true)
+          const setRes = await fetch(`${API_BASE_URL}/create-image-set`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'include',
+            body: JSON.stringify({ name: setName })
+          })
+          if (!setRes.ok) throw new Error('Failed to create destination image set')
+          const createdSet = await setRes.json()
+          targetSetId = createdSet.id
+          targetSetName = createdSet.name
+        } catch (err) {
+          alert('Upload cancelled: ' + err.message)
+          setIsLoading(false)
+          return
+        }
       }
     }
 
@@ -376,9 +392,8 @@ export default function CellAnnotationTool() {
     } finally {
       // Synchronize your component state caches
       loadImages()
-      loadImageSets() // Syncs the new album row if it was made
+      loadImageSets()
       setIsLoading(false)
-      if (autoCreateCheckbox) autoCreateCheckbox.checked = false // Uncheck box for next time
     }
   }
 
@@ -545,6 +560,7 @@ export default function CellAnnotationTool() {
           is_detected: true,
           name: labels[box.class].name,
           color: labels[box.class].color,
+          renderStyle: 'dashed'
         }))
 
         const drawnBoxes = (modelObj.annotations_drawn || []).map((box) => ({
@@ -553,6 +569,7 @@ export default function CellAnnotationTool() {
           is_detected: false,
           name: labels[box.class].name,
           color: labels[box.class].color,
+          renderStyle: 'solid'
         }))
 
         return [...detectedBoxes, ...drawnBoxes]
@@ -575,6 +592,7 @@ export default function CellAnnotationTool() {
         })
         setDetectionSettings(loadedRows)
         setSelectedRowId(loadedRows[0].id)
+        setActiveRowIds(loadedRows.map(row => row.id))
       }
 
     } catch (e) {
@@ -985,7 +1003,8 @@ export default function CellAnnotationTool() {
         model_id: row.selectedModelId,
         threshold: row.rowThreshold,
         cell_diameter: row.rowDiameter,
-        sublabel: row.rowSublabel
+        sublabel: row.rowSublabel,
+        selected_classes: row.selectedClasses
       }
 
       try {
@@ -1610,6 +1629,9 @@ export default function CellAnnotationTool() {
     setSetViewMenuOpen(true)
   }
   const [annotationModalOpen, setAnnotationModalOpen] = useState(false)
+
+  const [exportModalOpen, setExportModalOpen] = useState(false)
+  const [clearModalOpen, setClearModalOpen] = useState(false)
   // const [images] = useState([
   //   { url: 'https://picsum.photos/200/300?random=1', id: 1 },
   //   { url: 'https://picsum.photos/200/300?random=2', id: 2 },
@@ -1643,7 +1665,7 @@ export default function CellAnnotationTool() {
       return window.crypto.randomUUID()
     }
     // Fallback string generator if crypto isn't available (e.g. non-HTTPS)
-    return Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
+    return Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15)
   }
 
   const createEmptyRow = () => {
@@ -1682,8 +1704,48 @@ export default function CellAnnotationTool() {
     })
   }
 
-  const handleAddRow = () => setDetectionSettings((prevRows) => [...prevRows, createEmptyRow()])
-  const handleDeleteRow = (indexToRemove) => setDetectionSettings((prevRows) => prevRows.filter((_, i) => i !== indexToRemove))
+
+  const handleToggleRowVisibility = (rowId) => {
+    // 1. Calculate next visibility status based on current active state array
+    const isCurrentlyVisible = activeRowIds.includes(rowId)
+    const nextVisibility = !isCurrentlyVisible
+
+    setActiveRowIds(prev => 
+      isCurrentlyVisible 
+        ? prev.filter(activeId => activeId !== rowId) 
+        : [...prev, rowId]
+    )
+
+    // 2. Map through the flat boxes state array to flip the renderStyle of matching items
+    setBoxes(prevBoxes => 
+      prevBoxes.map(box => {
+        if (box.annotation_id !== rowId) return box
+
+        // If the row is visible, check the box data to see if it was auto-detected or manually drawn
+        return {
+          ...box,
+          renderStyle: nextVisibility 
+            ? (box.is_detected ? 'dashed' : 'solid') 
+            : 'invisible'
+        }
+      })
+    )
+  }
+
+  const handleAddRow = () => {
+    const newRow = createEmptyRow()
+    setDetectionSettings((prevRows) => [...prevRows, newRow])
+    setActiveRowIds((prevActive) => [...prevActive, newRow.id]) // Default new row to visible
+  }
+  const handleDeleteRow = (targetIndex) => {
+    const targetRow = detectionSettings[targetIndex]
+    setDetectionSettings((prevRows) => prevRows.filter((_, i) => i !== targetIndex))
+    if (targetRow) {
+      setActiveRowIds((prevActive) => prevActive.filter(id => id !== targetRow.id))
+      setAnnotations(prevAnnos => prevAnnos.filter(ann => ann.id !== targetRow.id))
+      setBoxes(prevBoxes => prevBoxes.filter(box => box.annotation_id !== targetRow.id))
+    }
+  }
   const handleSelectRow = (id) => {
     setSelectedRowId(id)
     setCurrentClass(0)
@@ -1692,299 +1754,18 @@ export default function CellAnnotationTool() {
   const selectedRow = detectionSettings.find(r => r.id === selectedRowId)
   const selectedRowModel = models.find(m => m.id === selectedRow?.selectedModelId)
   const selectedRowClasses = selectedRowModel?.label_set?.labels || []
+  const [activeRowIds, setActiveRowIds] = useState([detectionSettings[0]?.id].filter(Boolean))
+
+  useEffect(() => {
+    console.log(detectionSettings)
+  }, [detectionSettings])
+
   const tabs = [
 		{
 			label: 'Annotate',
 			content: (
         <Box>
-          <Typography variant='body1' sx={{ pt: 1, fontWeight: 'bold' }}>
-            Annotate Image
-          </Typography>
-          <PopupState variant='popover' popupId='class-popup-menu'>
-            {(popupState) => (
-              <Fragment>
-                <Button variant='contained' {...bindTrigger(popupState)} 
-                  endIcon={<KeyboardArrowDownIcon />} 
-                  sx={{...button_style_span, mt: 1}}
-                  disabled={selectedRowClasses.length === 0}
-                >
-                  {selectedRowClasses.length > 0 ? selectedRowClasses[currentClass]?.name : "No Classes Available"}
-                </Button>
-                <Menu {...bindMenu(popupState)}>
-                  {selectedRowClasses.map((item, index) => (
-                    <Box 
-                      key={index}
-                      display="flex" 
-                      alignItems="center" 
-                      gap={2}
-                      onClick={() => { setCurrentClass(index); popupState.close() }}
-                      sx={{ px: 2, py: 1, cursor: 'pointer', '&:hover': { bgcolor: 'action.hover' } }}
-                    >
-                      <input
-                        type="color"
-                        value={item.color}
-                        onChange={(e) => handleColorUpdate(index, e.target.value)}
-                        onClick={(e) => e.stopPropagation()} // Prevents menu closing on click
-                        style={{
-                          width: '24px',
-                          height: '24px',
-                          padding: 0,
-                          border: 'none',
-                          borderRadius: '4px', // Optional: rounded corners
-                          cursor: 'pointer',
-                          backgroundColor: 'transparent',
-                        }}
-                      />
-                      <Typography variant="body1">{item.name}</Typography>
-                    </Box>
-                  ))}
-                </Menu>
-              </Fragment>
-            )}
-          </PopupState>
-          <Box sx={{pt: 1, borderTop: 1, borderColor: 'grey.500'}}>
-            <RowMenu
-              rows={detectionSettings}
-              onAdd={handleAddRow}
-              onDelete={handleDeleteRow}
-              onChange={handleRowChange}
-              selectedRowId={selectedRowId}
-              onSelect={handleSelectRow}
-              renderRowTemplate={(row, index, handleFieldChange) => {
-                const currentModelData = models.find(m => m.id === row.selectedModelId)
-                const availableLabels = currentModelData?.label_set?.labels || []
-
-                return (
-                  <Box display="flex" flexDirection="row" alignItems="center" gap={1} width="100%">
-                    
-                    <Box display="flex" flexDirection="column" sx={{ flexGrow: 1 }}>
-                      {/* Model name — double-click to open dropdown */}
-                      {modelDropdownIndex === index ? (
-                        <FormControl size="small" sx={{ minWidth: 100 }} onClick={e => e.stopPropagation()}>
-                          <Select
-                            open
-                            value={row.selectedModelId}
-                            onChange={(e) => {
-                              handleFieldChange('selectedModelId', e.target.value)
-                              setModelDropdownIndex(null)
-                            }}
-                            onClose={() => setModelDropdownIndex(null)}
-                            variant="standard"
-                            sx={{ fontSize: '0.875rem', fontWeight: 500 }}
-                          >
-                            {models.map((model) => (
-                              <MenuItem key={model.id} value={model.id}>
-                                {model.name}
-                              </MenuItem>
-                            ))}
-                          </Select>
-                        </FormControl>
-                      ) : (
-                        <Typography
-                          variant="body2"
-                          fontWeight={500}
-                          onDoubleClick={(e) => {
-                            e.stopPropagation()
-                            setModelDropdownIndex(index)
-                          }}
-                          sx={{ minWidth: 60, cursor: 'text', px: 0.5, borderRadius: 0.5, '&:hover': { bgcolor: 'action.focus' } }}
-                        >
-                          {currentModelData?.name || 'No model'}
-                        </Typography>
-                      )}
-
-                      {/* Sublabel — double-click to edit inline */}
-                      {editingSublabelIndex === index ? (
-                        <TextField
-                          autoFocus
-                          size="small"
-                          variant="standard"
-                          value={sublabelDraft}
-                          onChange={(e) => setSublabelDraft(e.target.value)}
-                          onBlur={() => {
-                            handleFieldChange('rowSublabel', sublabelDraft)
-                            setEditingSublabelIndex(null)
-                          }}
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter') {
-                              handleFieldChange('rowSublabel', sublabelDraft)
-                              setEditingSublabelIndex(null)
-                            }
-                            if (e.key === 'Escape') setEditingSublabelIndex(null)
-                          }}
-                          onClick={(e) => e.stopPropagation()}
-                          sx={{ maxWidth: 120 }}
-                        />
-                      ) : (
-                        <Typography
-                          variant="body2"
-                          color="text.secondary"
-                          onDoubleClick={(e) => {
-                            e.stopPropagation()
-                            setEditingSublabelIndex(index)
-                            setSublabelDraft(row.rowSublabel || '')
-                          }}
-                          sx={{ flexGrow: 1, cursor: 'text', px: 0.5, borderRadius: 0.5, '&:hover': { bgcolor: 'action.focus' } }}
-                        >
-                          {row.rowSublabel || 'sublabel...'}
-                        </Typography>
-                      )}
-                    </Box>
-                    {/* Settings button */}
-                    <IconButton
-                      size="small"
-                      onClick={(e) => {
-                        e.stopPropagation()
-                        setSettingsRowIndex(index)
-                        setSettingsAnchor(e.currentTarget)
-                      }}
-                    >
-                      <SettingsIcon fontSize="small" />
-                    </IconButton>
-
-                    {/* Settings popover */}
-                    {settingsRowIndex === index && (
-                      <Popover
-                        open={Boolean(settingsAnchor) && settingsRowIndex === index}
-                        anchorEl={settingsAnchor}
-                        onClose={() => { setSettingsAnchor(null); setSettingsRowIndex(null) }}
-                        anchorOrigin={{ vertical: 'bottom', horizontal: 'left' }}
-                        transformOrigin={{ vertical: 'top', horizontal: 'left' }}
-                        onClick={(e) => e.stopPropagation()}
-                      >
-                        <Box sx={{ p: 2, display: 'flex', flexDirection: 'column', gap: 2, minWidth: 280 }}>
-                          <FormControl fullWidth size="small">
-                            <InputLabel>Model</InputLabel>
-                            <Select
-                              value={row.selectedModelId}
-                              label="Model"
-                              onChange={(e) => handleFieldChange('selectedModelId', e.target.value)}
-                            >
-                              {models.map((model) => (
-                                <MenuItem key={model.id} value={model.id}>
-                                  {model.name}
-                                </MenuItem>
-                              ))}
-                            </Select>
-                          </FormControl>
-                          <FormControl fullWidth size="small" disabled={!row.selectedModelId}>
-                            <InputLabel>Classes</InputLabel>
-                            <Select
-                              multiple
-                              value={row.selectedClasses}
-                              label="Classes"
-                              onChange={(e) => handleFieldChange('selectedClasses', e.target.value)}
-                              input={<OutlinedInput label="Classes" />}
-                              renderValue={(selected) => (
-                                <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
-                                  {selected.map((value) => {
-                                    const labelObj = availableLabels.find(l => l.name === value)
-                                    return (
-                                      <Chip
-                                        key={value}
-                                        label={value}
-                                        size="small"
-                                        style={{ backgroundColor: labelObj?.color, color: '#fff', fontWeight: 'bold' }}
-                                      />
-                                    )
-                                  })}
-                                </Box>
-                              )}
-                            >
-                              {availableLabels.map((label) => (
-                                <MenuItem key={label.name} value={label.name}>
-                                  {label.name}
-                                </MenuItem>
-                              ))}
-                            </Select>
-                          </FormControl>
-                          <TextField
-                            label="Sublabel"
-                            size="small"
-                            value={row.rowSublabel || ''}
-                            onChange={(e) => handleFieldChange('rowSublabel', e.target.value)}
-                          />
-                          <TextField
-                            label="Threshold (0-1)"
-                            type="number"
-                            size="small"
-                            inputProps={{ step: '0.1', min: '0', max: '1' }}
-                            value={row.rowThreshold}
-                            onChange={(e) => {
-                              let val = parseFloat(e.target.value)
-                              if (val > 1) val = 1
-                              if (val < 0) val = 0
-                              handleFieldChange('rowThreshold', isNaN(val) ? '' : val)
-                            }}
-                          />
-                          <TextField
-                            label="Cell Diameter"
-                            type="number"
-                            size="small"
-                            inputProps={{ step: '1' }}
-                            value={row.rowDiameter}
-                            onChange={(e) => {
-                              const val = parseInt(e.target.value, 10)
-                              handleFieldChange('rowDiameter', isNaN(val) ? '' : val)
-                            }}
-                          />
-                        </Box>
-                      </Popover>
-                    )}
-                  </Box>
-                )
-              }}
-            />
-            <Typography gutterBottom variant='body1' sx={{ fontWeight: 'bold' }}>
-              Manage Annotations
-            </Typography>
-            <Button variant='contained' component='label' onClick={saveAnnotations} sx={{...button_style_span}}>
-              Save Annotations
-            </Button>
-            <Button variant='contained' component='label' onClick={exportAnnotations} sx={{...button_style_span}}>
-              Export Annotations
-            </Button>
-            <Tooltip title="Check to export only the annotation .txt file. Leave unchecked to export the image as well." arrow placement="top">
-              <Box sx={{ display: 'flex', alignItems: 'center', mb: 0.5 }}>
-                <Checkbox
-                  checked={annotationsOnly}
-                  onChange={(e) => setAnnotationsOnly(e.target.checked)}
-                  size='small'
-                  sx={{ p: 0, mr: 0.5 }}
-                />
-                <Typography variant='body2'>Annotations only</Typography>
-              </Box>
-            </Tooltip>
-            <Button variant='contained' component='label' sx={{...button_style_span}}>
-              Import Annotations
-              <input hidden type='file' accept='txt' onChange={importAnnotations}/>
-            </Button>
-            <Button variant='contained' component='label' onClick={() => setAnnotationModalOpen(true)} sx={{...button_style_span, bgcolor: 'error.dark', '&:hover': { bgcolor: 'error.light' }}}>
-              Clear Annotations
-            </Button>
-            <SideMenu 
-              anchorSide='left'
-              open={annotationModalOpen} 
-              onClose={() => setAnnotationModalOpen(false)}
-            >
-              <p></p>
-              <Button onClick={() => setAnnotationModalOpen(false)}>
-                Close!
-              </Button>
-            </SideMenu>
-            <Box sx={{ display: 'flex', alignItems: 'center', mb: 0.5 }}>
-              <Checkbox
-                checked={showLabels}
-                onChange={(e) => setShowLabels(e.target.checked)}
-                size='small'
-                sx={{ p: 0, mr: 0.5 }}
-              />
-              <Typography variant='body2'>Show labels</Typography>
-            </Box>
-            <Typography gutterBottom variant='body2' sx={{ fontWeight: 'bold' }}>
-              Current Cells: {annotations_old.length}
-            </Typography>
-          </Box>
+          
           <Box sx={{pt: 1, borderTop: 1, borderColor: 'grey.500'}}>
             <Typography gutterBottom variant='body1' sx={{ fontWeight: 'bold' }}>
               Train / Fine Tune
@@ -2140,9 +1921,7 @@ export default function CellAnnotationTool() {
               </Box>
             </Modal>
             
-            <Button variant='contained' component='label' onClick={() => setCalibratorOpen(true)} sx={{...button_style_span}}>
-              Calibrate Cell Size
-            </Button>
+            
           </Box>
           <Button variant='contained' component='label' onClick={detect} sx={{...button_style_span}}>
             Single Detect
@@ -2377,288 +2156,692 @@ export default function CellAnnotationTool() {
         }}
       >
         <SideMenu anchorSide='left'>
-          <Typography gutterBottom variant='h6' fontWeight={'bold'}>
+          <Box>
+            <Typography gutterBottom variant='h6' fontWeight={'bold'}>
               Cell Annotation Tool (CAT🐱)
-          </Typography>
-          <Button variant='contained' component='label' sx={{...button_style_span}}>
-            Upload Images
-            <input hidden type='file' accept='image/tiff' multiple onChange={handleUpload}/>
-          </Button>
-          <FormControlLabel
-            control={
-              <Checkbox 
-                id="auto-create-set-checkbox"
-                size="small"
-                sx={{ color: 'text.secondary' }}
-              />
-            }
-            label={<Typography variant="body2" color="text.secondary">Create image set from uploads</Typography>}
-          />
-          <Button 
-            variant='contained' 
-            onClick={() => setOpenImageMenuOpen(true)} 
-            sx={{...button_style_span}}
-          >
-            Open Image
-          </Button>
-
-          <GalleryMenu 
-            open={openImageMenuOpen}
-            handleClose={() => setOpenImageMenuOpen(false)}
-            images={imageList}
-            onImageClick={handleLoadImage}
+            </Typography>
+          </Box>
+          <Box sx={{pt: 1, mt: 2, borderTop: 1, borderColor: 'grey.500'}}>
+            <Typography variant='body1' sx={{ pt: 1, fontWeight: 'bold' }}>
+              Manage Images
+            </Typography>
             
-            // Pass the buttons in dynamically here
-            renderActions={(img) => (
-              <>
-                <IconButton 
-                  size="small" 
-                  sx={{ color: '#fff', '&:hover': { color: '#e0e0e0' } }}
-                  onClick={(e) => {
-                    e.stopPropagation(); // Prevents clicking the button from triggering onImageClick
-                    console.log("Settings clicked for image:", img.id);
-                  }}
-                >
-                  <SettingsIcon fontSize="small" />
-                </IconButton>
-                
-                <IconButton 
-                  size="small" 
-                  sx={{ color: '#F87171', '&:hover': { color: '#EF4444' } }} // Red accent colors
-                  onClick={(e) => {
-                    e.stopPropagation(); // Crucial to avoid loading the image while deleting it!
-                    handleDeleteImage(img.id);
-                  }}
-                >
-                  <DeleteIcon fontSize="small" />
-                </IconButton>
-              </>
-            )}
-          />
-          <Button 
-            variant="contained" 
-            onClick={() => setImageSetsMenuOpen(true)} 
-            sx={{ ...button_style_span }}
-          >
-            Manage Image Sets
-          </Button>
-          <Modal
-            open={imageSetsMenuOpen}
-            onClose={() => setImageSetsMenuOpen(false)}
-            aria-labelledby="image-sets-modal-title"
-            sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-          >
-            <Box
-              sx={{
-                position: 'relative',
-                width: '100%',
-                maxWidth: 550,
-                bgcolor: 'background.paper',
-                borderRadius: 2,
-                boxShadow: 24,
-                p: 3,
-                outline: 'none',
-                maxHeight: '85vh',
-                overflowY: 'auto'
-              }}
-            >
-              {/* Modal Header */}
-              <Box display="flex" justifyContent="space-between" alignItems="center" sx={{ mb: 2 }}>
-                <Typography id="image-sets-modal-title" variant="h6" sx={{ fontWeight: 'bold' }}>
-                  Manage Image Sets
-                </Typography>
-                <IconButton onClick={() => setImageSetsMenuOpen(false)} size="small">
-                  <CloseIcon />
-                </IconButton>
-              </Box>
-
-              <Divider sx={{ mb: 2 }} />
-
-              {/* Content Window containing RowMenu */}
-              <RowMenu 
-                rows={imageSets}
-                headers={["Set Name", "Total Images"]}
-                gridTemplateColumns="3fr 1fr"
-                onAdd={handleCreateImageSet}
-                onDelete={handleDeleteImageSet}
-                onChange={() => {}}
-                onSelect={handleSelectImageSet}
-                renderRowTemplate={(row) => (
-                  <Box display="grid" gridTemplateColumns="3fr 1fr" gap={2} alignItems="center">
-                    <Typography variant="body1" sx={{ fontWeight: 500, minWidth: 0, noWrap: true }}>
-                      {row.name}
-                    </Typography>
-                    <Typography variant="body2" color="text.secondary">
-                      {row.image_count} items
-                    </Typography>
-                  </Box>
-                )}
-              />
-              <GalleryMenu 
-                open={setViewMenuOpen}
-                handleClose={() => setSetViewMenuOpen(false)}
-                title={activeImageSet ? `Image Set: ${activeImageSet.name}` : 'Image Set Gallery'}
-                images={activeImageSet?.images || []}
-                onImageClick={handleLoadImage} // Clicking standard image still loads canvas layout
-                
-                // 1. Render custom "Add Images" button in the header bar
-                renderHeaderActions={() => (
-                  <Button
-                    variant="outlined"
-                    size="small"
-                    startIcon={<AddIcon />}
-                    onClick={() => setAddImagesSelectionOpen(true)}
+            <Tooltip title="Open Image" arrow>
+              <IconButton 
+                color="primary"
+                onClick={() => setOpenImageMenuOpen(true)} 
+                sx={{ p: 1.5 }}
+              >
+                <FolderOpenIcon />
+              </IconButton>
+            </Tooltip>
+            <GalleryMenu 
+              open={openImageMenuOpen}
+              handleClose={() => setOpenImageMenuOpen(false)}
+              images={imageList}
+              onImageClick={handleLoadImage}
+              
+              renderActions={(img) => (
+                <>
+                  <IconButton 
+                    size="small" 
+                    sx={{ color: '#fff', '&:hover': { color: '#e0e0e0' } }}
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      console.log("Settings clicked for image:", img.id)
+                    }}
                   >
-                    Add Images
-                  </Button>
-                )}
-
-                // 2. Render actions overlay for images currently inside the set (Trash Can)
-                renderActions={(img) => (
+                    <SettingsIcon fontSize="small" />
+                  </IconButton>
+                  
                   <IconButton 
                     size="small" 
                     sx={{ color: '#F87171', '&:hover': { color: '#EF4444' } }}
                     onClick={(e) => {
-                      e.stopPropagation() 
-                      handleRemoveImageFromSet(img.id)
+                      e.stopPropagation()
+                      handleDeleteImage(img.id)
                     }}
                   >
                     <DeleteIcon fontSize="small" />
                   </IconButton>
-                )}
-              />
-              <GalleryMenu
-                open={addImagesSelectionOpen}
-                handleClose={() => setAddImagesSelectionOpen(false)}
-                title="Select Images to Add to Set"
-                images={imageList} // Displays every image uploaded globally by the user
-                onImageClick={(img) => {
-                  handleAddImageToSet(img)
+                </>
+              )}
+            />
+
+            <Tooltip title="Upload Images" arrow>
+              <IconButton 
+                component="label" 
+                color="primary"
+                sx={{ p: 1.5 }}
+              >
+                <FileUploadIcon />
+                <input 
+                  hidden 
+                  type="file" 
+                  accept=".tiff,.tif" 
+                  multiple 
+                  onChange={handleUpload}
+                />
+              </IconButton>
+            </Tooltip>
+
+            <Tooltip title="Download Image" arrow>
+              <IconButton 
+                color="primary"
+                onClick={handleSave} 
+                sx={{ p: 1.5 }}
+              >
+                <DownloadIcon />
+              </IconButton>
+            </Tooltip>
+
+            <Tooltip title="Manage Image Sets" arrow>
+              <IconButton 
+                color="primary"
+                onClick={() => setImageSetsMenuOpen(true)} 
+                sx={{ p: 1.5 }}
+              >
+                <CollectionsIcon />
+              </IconButton>
+            </Tooltip>
+            <Modal
+              open={imageSetsMenuOpen}
+              onClose={() => setImageSetsMenuOpen(false)}
+              aria-labelledby="image-sets-modal-title"
+              sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+            >
+              <Box
+                sx={{
+                  position: 'relative',
+                  width: '100%',
+                  maxWidth: 550,
+                  bgcolor: 'background.paper',
+                  borderRadius: 2,
+                  boxShadow: 24,
+                  p: 3,
+                  outline: 'none',
+                  maxHeight: '85vh',
+                  overflowY: 'auto'
                 }}
-              
-                renderActions={(img) => {
-                  // Add optional chaining and fallback array here too
-                  const currentImages = activeImageSet?.images || []
-                  const isAlreadyInSet = currentImages.some(item => item.id === img.id)
+              >
+                {/* Modal Header */}
+                <Box display="flex" justifyContent="space-between" alignItems="center" sx={{ mb: 2 }}>
+                  <Typography id="image-sets-modal-title" variant="h6" sx={{ fontWeight: 'bold' }}>
+                    Manage Image Sets
+                  </Typography>
+                  <IconButton onClick={() => setImageSetsMenuOpen(false)} size="small">
+                    <CloseIcon />
+                  </IconButton>
+                </Box>
+
+                <Divider sx={{ mb: 2 }} />
+
+                {/* Content Window containing RowMenu */}
+                <RowMenu 
+                  rows={imageSets}
+                  headers={["Set Name", "Total Images"]}
+                  gridTemplateColumns="3fr 1fr"
+                  onAdd={handleCreateImageSet}
+                  onDelete={handleDeleteImageSet}
+                  onChange={() => {}}
+                  onSelect={handleSelectImageSet}
+                  renderRowTemplate={(row) => (
+                    <Box display="grid" gridTemplateColumns="3fr 1fr" gap={2} alignItems="center">
+                      <Typography variant="body1" sx={{ fontWeight: 500, minWidth: 0, noWrap: true }}>
+                        {row.name}
+                      </Typography>
+                      <Typography variant="body2" color="text.secondary">
+                        {row.image_count} items
+                      </Typography>
+                    </Box>
+                  )}
+                />
+                
+                <GalleryMenu 
+                  open={setViewMenuOpen}
+                  handleClose={() => setSetViewMenuOpen(false)}
+                  title={activeImageSet ? `Image Set: ${activeImageSet.name}` : 'Image Set Gallery'}
+                  images={activeImageSet?.images || []}
+                  onImageClick={handleLoadImage}
                   
-                  return isAlreadyInSet ? (
-                    <Typography variant="caption" sx={{ color: '#4ADE80', px: 1, fontWeight: 'bold' }}>
-                      Added
-                    </Typography>
-                  ) : (
+                  renderHeaderActions={() => (
+                    <Button
+                      variant="outlined"
+                      size="small"
+                      startIcon={<AddIcon />}
+                      onClick={() => setAddImagesSelectionOpen(true)}
+                    >
+                      Add Images
+                    </Button>
+                  )}
+
+                  renderActions={(img) => (
                     <IconButton 
                       size="small" 
-                      sx={{ color: '#60A5FA', '&:hover': { color: '#3B82F6' } }}
+                      sx={{ color: '#F87171', '&:hover': { color: '#EF4444' } }}
                       onClick={(e) => {
-                        e.stopPropagation()
-                        handleAddImageToSet(img)
+                        e.stopPropagation() 
+                        handleRemoveImageFromSet(img.id)
                       }}
                     >
-                      <AddIcon fontSize="small" />
+                      <DeleteIcon fontSize="small" />
                     </IconButton>
-                  )
-                }}
-              />
-            </Box>
-          </Modal>
-          <Button variant='contained' component='label' onClick={handleSave} sx={{...button_style_span}}>
-            Save Image
-          </Button>
-          <Button variant='contained' component='label' onClick={toggleCrop}  sx={{...button_style_span, bgcolor: isCropping ? 'primary.dark' : 'containedPrimary',}}>
-            Crop Image
-          </Button>
+                  )}
+                />
+                
+                <GalleryMenu
+                  open={addImagesSelectionOpen}
+                  handleClose={() => setAddImagesSelectionOpen(false)}
+                  title="Select Images to Add to Set"
+                  images={imageList}
+                  onImageClick={(img) => {
+                    handleAddImageToSet(img)
+                  }}
+                
+                  renderActions={(img) => {
+                    const currentImages = activeImageSet?.images || []
+                    const isAlreadyInSet = currentImages.some(item => item.id === img.id)
+                    
+                    return isAlreadyInSet ? (
+                      <Typography variant="caption" sx={{ color: '#4ADE80', px: 1, fontWeight: 'bold' }}>
+                        Added
+                      </Typography>
+                    ) : (
+                      <IconButton 
+                        size="small" 
+                        sx={{ color: '#60A5FA', '&:hover': { color: '#3B82F6' } }}
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          handleAddImageToSet(img)
+                        }}
+                      >
+                        <AddIcon fontSize="small" />
+                      </IconButton>
+                    )
+                  }}
+                />
+              </Box>
+            </Modal>
 
-          <Stack spacing={2} sx={{ width: '100%' }}>
-            <AdjustableSlider
-              label='Brightness'
-              value={brightness}
-              onChange={(e, val) => setBrightness(val)}
-              min={bMin}
-              setMin={setBMin}
-              max={bMax}
-              setMax={setBMax}
-            />
-            <AdjustableSlider
-              label='Contrast'
-              value={contrast}
-              onChange={(e, val) => setContrast(val)}
-              min={cMin}
-              setMin={setCMin}
-              max={cMax}
-              setMax={setCMax}
-            />
-          </Stack>
-          
-          <Typography variant='body1' sx={{ pt: 1, fontWeight: 'bold' }}>
-            Select Model
-          </Typography>
-          <PopupState variant='popover' popupId='model-popup-menu'>
-            {(popupState) => (
-              <Fragment>
-                <Button 
-                  variant='contained' 
-                  {...bindTrigger(popupState)} 
-                  disabled={models.length === 0} // Disable if no models yet
-                  endIcon={<KeyboardArrowDownIcon />} 
-                  sx={{ ...button_style_span, mt: 1 }}
-                >
-                  {models.length > 0 ? models[currentModel].name : "No Models Available"}
-                </Button>
-                <Menu {...bindMenu(popupState)}>
-                  {models.map((item, index) => (
-                    <MenuItem key={index} onClick={() => {setCurrentModel(index); setCurrentClass(0)}}>
-                      <Typography variant='body1'>{item.name}</Typography>
-                    </MenuItem>
-                  ))}
-                </Menu>
-              </Fragment>
-            )}
-          </PopupState>
-          
-          <Button variant='contained' component='label' onClick={handleOpenCustomUploadModal} sx={{...button_style_span}}>
-            Load Custom
-          </Button>
-          <Modal
-            open={customUploadModalOpen}
-            onClose={cancelCustom}
-          >
-            <Box sx={{...modal_style}}>
-              <Typography>Load Custom Model</Typography>
-              <TextField
-                label="Model Name"
-                variant="outlined"
-                fullWidth
-                value={customModelName}
-                onChange={(e) => setCustomModelName(e.target.value)}
+            <Tooltip title="Crop Image" arrow>
+              <IconButton 
+                onClick={toggleCrop}  
+                sx={{ 
+                  p: 1.5,
+                  bgcolor: isCropping ? 'primary.dark' : 'transparent',
+                  color: isCropping ? '#fff' : 'primary.main',
+                  '&:hover': {
+                    bgcolor: isCropping ? 'primary.dark' : 'action.hover'
+                  }
+                }}
+              >
+                <CropIcon />
+              </IconButton>
+            </Tooltip>
+
+            <Stack spacing={2} sx={{ width: '100%' }}>
+              <AdjustableSlider
+                label='Brightness'
+                value={brightness}
+                onChange={(e, val) => setBrightness(val)}
+                min={bMin}
+                setMin={setBMin}
+                max={bMax}
+                setMax={setBMax}
               />
-              <Button variant='contained' component='label'>
-                Select File
-                <input hidden type='file' accept='.pt' onChange={handleChooseCustomModel} />
-              </Button>
-              <PopupState variant='popover' popupId='model-popup-menu'>
-                {(popupState) => (
-                  <Fragment>
-                    <Button variant='contained' {...bindTrigger(popupState)} endIcon={<KeyboardArrowDownIcon />}>
-                      {customModelType || 'Select Type'}
+              <AdjustableSlider
+                label='Contrast'
+                value={contrast}
+                onChange={(e, val) => setContrast(val)}
+                min={cMin}
+                setMin={setCMin}
+                max={cMax}
+                setMax={setCMax}
+              />
+            </Stack>
+          </Box>
+          <Box sx={{pt: 1, mt: 2, borderTop: 1, borderColor: 'grey.500'}}>
+            <Typography variant='body1' sx={{ pt: 1, fontWeight: 'bold' }}>
+              Manage Annotations
+            </Typography>
+            {/* 1. SAVE ANNOTATIONS */}
+            <Tooltip title="Save Annotations" arrow>
+              <IconButton 
+                color="primary" 
+                onClick={saveAnnotations}
+                sx={{ p: 1.5 }}
+              >
+                <SaveAsIcon />
+              </IconButton>
+            </Tooltip>
+
+            {/* 2. EXPORT ANNOTATIONS (Triggers new Configuration Modal) */}
+            <Tooltip title="Export Options" arrow>
+              <IconButton 
+                color="primary" 
+                onClick={() => setExportModalOpen(true)}
+                sx={{ p: 1.5 }}
+              >
+                <FileDownloadIcon />
+              </IconButton>
+            </Tooltip>
+            <Modal
+              open={exportModalOpen}
+              onClose={() => setExportModalOpen(false)}
+              aria-labelledby="export-modal-title"
+              sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+            >
+              <Box
+                sx={{
+                  width: '100%',
+                  maxWidth: 400,
+                  bgcolor: 'background.paper',
+                  borderRadius: 2,
+                  boxShadow: 24,
+                  p: 3,
+                  outline: 'none'
+                }}
+              >
+                <Box display="flex" justifyContent="space-between" alignItems="center" sx={{ mb: 2 }}>
+                  <Typography id="export-modal-title" variant="h6" sx={{ fontWeight: 'bold' }}>
+                    Export Options
+                  </Typography>
+                  <IconButton onClick={() => setExportModalOpen(false)} size="small">
+                    <CloseIcon />
+                  </IconButton>
+                </Box>
+
+                <Divider sx={{ mb: 2 }} />
+
+                <Stack spacing={2.5}>
+                  {/* Scope Settings toggles */}
+                  <FormControlLabel
+                    control={
+                      <Checkbox 
+                        checked={annotationsOnly}
+                        onChange={(e) => setAnnotationsOnly(e.target.checked)}
+                      />
+                    }
+                    label={
+                      <Box>
+                        <Typography variant="body1" sx={{ fontWeight: 500 }}>Export annotations only</Typography>
+                        <Typography variant="caption" color="text.secondary">
+                          Leaves behind the base normalized image file stream
+                        </Typography>
+                      </Box>
+                    }
+                  />
+
+                  {/* Action Buttons */}
+                  <Box display="flex" gap={1.5} justifyContent="flex-end" sx={{ mt: 1 }}>
+                    <Button 
+                      variant="outlined" 
+                      onClick={() => setExportModalOpen(false)}
+                    >
+                      Cancel
                     </Button>
-                    <Menu {...bindMenu(popupState)}>
-                      {modelTypes.map((item, index) => (
-                        <MenuItem 
-                          key={index}
-                          onClick={() => {setCustomModelType(item)}}
-                        >
-                            <Typography variant='body1'>{item}</Typography>
-                        </MenuItem>
-                      ))}
-                    </Menu>
-                  </Fragment>
-                )}
-              </PopupState>
-              <Typography>Selected: {customModelFilename}</Typography>
-              <Button onClick={handleUploadCustomModel}>Confirm</Button>
-              <Button onClick={cancelCustom}>Cancel</Button>
+                    <Button 
+                      variant="contained" 
+                      startIcon={<FileDownloadIcon />}
+                      onClick={() => {
+                        exportAnnotations() // Fires your standard download workflow logic
+                        setExportModalOpen(false) // Close modal smoothly
+                      }}
+                    >
+                      Download Package
+                    </Button>
+                  </Box>
+                </Stack>
+              </Box>
+            </Modal>
+
+            {/* 3. IMPORT ANNOTATIONS */}
+            <Tooltip title="Import Annotations" arrow>
+              <IconButton 
+                component="label"
+                color="primary" 
+                sx={{ p: 1.5 }}
+              >
+                <FileUploadIcon />
+                <input hidden type="file" accept=".txt" onChange={importAnnotations}/>
+              </IconButton>
+            </Tooltip>
+
+            {/* 4. CLEAR ANNOTATIONS */}
+            <Tooltip title="Clear Canvas Annotations" arrow>
+              <IconButton 
+                onClick={() => setClearModalOpen(true)}
+                sx={{ 
+                  p: 1.5, 
+                  color: 'error.main',
+                  '&:hover': { bgcolor: 'error.lighter' }
+                }}
+              >
+                <DeleteSweepIcon />
+              </IconButton>
+            </Tooltip>
+
+            <Tooltip title="Load Custom Model" arrow>
+              <IconButton 
+                color="primary"
+                onClick={handleOpenCustomUploadModal} 
+                sx={{ p: 1.5 }}
+              >
+                <DriveFolderUploadIcon />
+              </IconButton>
+            </Tooltip>
+            <Modal
+              open={customUploadModalOpen}
+              onClose={cancelCustom}
+            >
+              <Box sx={{...modal_style}}>
+                <Typography>Load Custom Model</Typography>
+                <TextField
+                  label="Model Name"
+                  variant="outlined"
+                  fullWidth
+                  value={customModelName}
+                  onChange={(e) => setCustomModelName(e.target.value)}
+                />
+                <Button variant='contained' component='label'>
+                  Select File
+                  <input hidden type='file' accept='.pt' onChange={handleChooseCustomModel} />
+                </Button>
+                <PopupState variant='popover' popupId='model-popup-menu'>
+                  {(popupState) => (
+                    <Fragment>
+                      <Button variant='contained' {...bindTrigger(popupState)} endIcon={<KeyboardArrowDownIcon />}>
+                        {customModelType || 'Select Type'}
+                      </Button>
+                      <Menu {...bindMenu(popupState)}>
+                        {modelTypes.map((item, index) => (
+                          <MenuItem 
+                            key={index}
+                            onClick={() => {setCustomModelType(item)}}
+                          >
+                              <Typography variant='body1'>{item}</Typography>
+                          </MenuItem>
+                        ))}
+                      </Menu>
+                    </Fragment>
+                  )}
+                </PopupState>
+                <Typography>Selected: {customModelFilename}</Typography>
+                <Button onClick={handleUploadCustomModel}>Confirm</Button>
+                <Button onClick={cancelCustom}>Cancel</Button>
+              </Box>
+            </Modal>
+
+            <PopupState variant='popover' popupId='class-popup-menu'>
+              {(popupState) => (
+                <Fragment>
+                  <Button variant='contained' {...bindTrigger(popupState)} 
+                    endIcon={<KeyboardArrowDownIcon />} 
+                    sx={{...button_style_span, mt: 1}}
+                    disabled={selectedRowClasses.length === 0}
+                  >
+                    {selectedRowClasses.length > 0 ? selectedRowClasses[currentClass]?.name : "No Classes Available"}
+                  </Button>
+                  <Menu {...bindMenu(popupState)}>
+                    {selectedRowClasses.map((item, index) => (
+                      <Box 
+                        key={index}
+                        display="flex" 
+                        alignItems="center" 
+                        gap={2}
+                        onClick={() => { setCurrentClass(index); popupState.close() }}
+                        sx={{ px: 2, py: 1, cursor: 'pointer', '&:hover': { bgcolor: 'action.hover' } }}
+                      >
+                        <input
+                          type="color"
+                          value={item.color}
+                          onChange={(e) => handleColorUpdate(index, e.target.value)}
+                          onClick={(e) => e.stopPropagation()} // Prevents menu closing on click
+                          style={{
+                            width: '24px',
+                            height: '24px',
+                            padding: 0,
+                            border: 'none',
+                            borderRadius: '4px', // Optional: rounded corners
+                            cursor: 'pointer',
+                            backgroundColor: 'transparent',
+                          }}
+                        />
+                        <Typography variant="body1">{item.name}</Typography>
+                      </Box>
+                    ))}
+                  </Menu>
+                </Fragment>
+              )}
+            </PopupState>
+            <Box sx={{ display: 'flex', alignItems: 'center', mb: 0.5 }}>
+              <Checkbox
+                checked={showLabels}
+                onChange={(e) => setShowLabels(e.target.checked)}
+                size='small'
+                sx={{ p: 0, mr: 0.5 }}
+              />
+              <Typography variant='body2'>Show labels</Typography>
             </Box>
-          </Modal>
+            <RowMenu
+              rows={detectionSettings}
+              onAdd={handleAddRow}
+              onDelete={handleDeleteRow}
+              onChange={handleRowChange}
+              selectedRowId={selectedRowId}
+              onSelect={handleSelectRow}
+              renderRowTemplate={(row, index, handleFieldChange) => {
+                const currentModelData = models.find(m => m.id === row.selectedModelId)
+                const availableLabels = currentModelData?.label_set?.labels || []
+                const isVisible = activeRowIds.includes(row.id)
+
+                return (
+                  <Box 
+                    display="flex" 
+                    flexDirection="row" 
+                    alignItems="center" 
+                    gap={1} 
+                    width="100%"
+                    sx={{ 
+                      opacity: isVisible ? 1 : 0.5, // Dim the inner contents if hidden
+                      transition: 'opacity 0.15s ease-in-out'
+                    }}
+                  >
+                    {/* Visibility Toggle Eye (Acts like an illustration program layer checkbox) */}
+                    <IconButton
+                      size="small"
+                      onClick={(e) => {
+                        e.stopPropagation() // Vital: stops the row from getting highlighted/selected on eye click
+                        handleToggleRowVisibility(row.id)
+                      }}
+                      sx={{ mr: 0.5, color: isVisible ? 'primary.main' : 'text.disabled' }}
+                    >
+                      {isVisible ? <VisibilityIcon fontSize="small" /> : <VisibilityOffIcon fontSize="small" />}
+                    </IconButton>
+                    
+                    <Box display="flex" flexDirection="column" sx={{ flexGrow: 1 }}>
+                      {/* Model name — double-click to open dropdown */}
+                      {modelDropdownIndex === index ? (
+                        <FormControl size="small" sx={{ minWidth: 100 }} onClick={e => e.stopPropagation()}>
+                          <Select
+                            open
+                            value={row.selectedModelId}
+                            onChange={(e) => {
+                              handleFieldChange('selectedModelId', e.target.value)
+                              setModelDropdownIndex(null)
+                            }}
+                            onClose={() => setModelDropdownIndex(null)}
+                            variant="standard"
+                            sx={{ fontSize: '0.875rem', fontWeight: 500 }}
+                          >
+                            {models.map((model) => (
+                              <MenuItem key={model.id} value={model.id}>
+                                {model.name}
+                              </MenuItem>
+                            ))}
+                          </Select>
+                        </FormControl>
+                      ) : (
+                        <Typography
+                          variant="body2"
+                          fontWeight={500}
+                          onDoubleClick={(e) => {
+                            e.stopPropagation()
+                            setModelDropdownIndex(index)
+                          }}
+                          sx={{ minWidth: 60, cursor: 'text', px: 0.5, borderRadius: 0.5, '&:hover': { bgcolor: 'action.focus' } }}
+                        >
+                          {currentModelData?.name || 'No model'}
+                        </Typography>
+                      )}
+
+                      {/* Sublabel — double-click to edit inline */}
+                      {editingSublabelIndex === index ? (
+                        <TextField
+                          autoFocus
+                          size="small"
+                          variant="standard"
+                          value={sublabelDraft}
+                          onChange={(e) => setSublabelDraft(e.target.value)}
+                          onBlur={() => {
+                            handleFieldChange('rowSublabel', sublabelDraft)
+                            setEditingSublabelIndex(null)
+                          }}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              handleFieldChange('rowSublabel', sublabelDraft)
+                              setEditingSublabelIndex(null)
+                            }
+                            if (e.key === 'Escape') setEditingSublabelIndex(null)
+                          }}
+                          onClick={(e) => e.stopPropagation()}
+                          sx={{ maxWidth: 120 }}
+                        />
+                      ) : (
+                        <Typography
+                          variant="body2"
+                          color="text.secondary"
+                          onDoubleClick={(e) => {
+                            e.stopPropagation()
+                            setEditingSublabelIndex(index)
+                            setSublabelDraft(row.rowSublabel || '')
+                          }}
+                          sx={{ flexGrow: 1, cursor: 'text', px: 0.5, borderRadius: 0.5, '&:hover': { bgcolor: 'action.focus' } }}
+                        >
+                          {row.rowSublabel || '...'}
+                        </Typography>
+                      )}
+                    </Box>
+                    
+                    {/* Settings button */}
+                    <IconButton
+                      size="small"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        setSettingsRowIndex(index)
+                        setSettingsAnchor(e.currentTarget)
+                      }}
+                    >
+                      <SettingsIcon fontSize="small" />
+                    </IconButton>
+
+                    {/* Settings popover */}
+                    {settingsRowIndex === index && (
+                      <Popover
+                        open={Boolean(settingsAnchor) && settingsRowIndex === index}
+                        anchorEl={settingsAnchor}
+                        onClose={() => { setSettingsAnchor(null); setSettingsRowIndex(null) }}
+                        anchorOrigin={{ vertical: 'bottom', horizontal: 'left' }}
+                        transformOrigin={{ vertical: 'top', horizontal: 'left' }}
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <Box sx={{ p: 2, display: 'flex', flexDirection: 'column', gap: 2, minWidth: 280 }}>
+                          <FormControl fullWidth size="small">
+                            <InputLabel>Model</InputLabel>
+                            <Select
+                              value={row.selectedModelId}
+                              label="Model"
+                              onChange={(e) => handleFieldChange('selectedModelId', e.target.value)}
+                            >
+                              {models.map((model) => (
+                                <MenuItem key={model.id} value={model.id}>
+                                  {model.name}
+                                </MenuItem>
+                              ))}
+                            </Select>
+                          </FormControl>
+                          <FormControl fullWidth size="small" disabled={!row.selectedModelId}>
+                            <InputLabel>Classes</InputLabel>
+                            <Select
+                              multiple
+                              value={row.selectedClasses}
+                              label="Classes"
+                              onChange={(e) => handleFieldChange('selectedClasses', e.target.value)}
+                              input={<OutlinedInput label="Classes" />}
+                              renderValue={(selected) => (
+                                <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
+                                  {selected.map((value) => {
+                                    const labelObj = availableLabels.find(l => l.name === value)
+                                    return (
+                                      <Chip
+                                        key={value}
+                                        label={value}
+                                        size="small"
+                                        style={{ backgroundColor: labelObj?.color, color: '#fff', fontWeight: 'bold' }}
+                                      />
+                                    )
+                                  })}
+                                </Box>
+                              )}
+                            >
+                              {availableLabels.map((label) => (
+                                <MenuItem key={label.name} value={label.name}>
+                                  {label.name}
+                                </MenuItem>
+                              ))}
+                            </Select>
+                          </FormControl>
+                          <TextField
+                            label="Sublabel"
+                            size="small"
+                            value={row.rowSublabel || ''}
+                            onChange={(e) => handleFieldChange('rowSublabel', e.target.value)}
+                          />
+                          <TextField
+                            label="Threshold (0-1)"
+                            type="number"
+                            size="small"
+                            inputProps={{ step: '0.1', min: '0', max: '1' }}
+                            value={row.rowThreshold}
+                            onChange={(e) => {
+                              let val = parseFloat(e.target.value)
+                              if (val > 1) val = 1
+                              if (val < 0) val = 0
+                              handleFieldChange('rowThreshold', isNaN(val) ? '' : val)
+                            }}
+                          />
+                          <TextField
+                            label="Cell Diameter"
+                            type="number"
+                            size="small"
+                            inputProps={{ step: '1' }}
+                            value={row.rowDiameter}
+                            onChange={(e) => {
+                              const val = parseInt(e.target.value, 10)
+                              handleFieldChange('rowDiameter', isNaN(val) ? '' : val)
+                            }}
+                          />
+                        </Box>
+                      </Popover>
+                    )}
+                  </Box>
+                )
+              }}
+            />
+            <Button variant='contained' component='label' onClick={() => setCalibratorOpen(true)} sx={{...button_style_span}}>
+              Calibrate Cell Size
+            </Button>
+          </Box>
           
           <TabMenu items={tabs}></TabMenu>
         </SideMenu>

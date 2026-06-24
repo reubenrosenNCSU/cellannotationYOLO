@@ -174,9 +174,28 @@ export default function ImageCanvas({ src, boxes, onAddBox, onRemoveBox, isCropp
     const fontSize = 11 / scale
     ctx.font = `${fontSize}px sans-serif`
     boxes.forEach((box) => {
+      const style = box.renderStyle || 'solid'
+
+      if (style === 'invisible') {
+        return
+      }
+      // Configure canvas dash line definitions
+      if (style === 'dashed') {
+        // Line length of 6 pixels, gap of 4 pixels (scaled dynamically)
+        ctx.setLineDash([6 / scale, 4 / scale])
+      } else if (style === 'dotted') {
+        // Line length of 2 pixels, gap of 2 pixels (scaled dynamically)
+        ctx.setLineDash([2 / scale, 2 / scale])
+      } else {
+        // 'solid' style resets configuration back to a default unbroken line
+        ctx.setLineDash([])
+      }
+
       const color = box.color
       ctx.strokeStyle = color
       ctx.strokeRect(box.x, box.y, box.w, box.h)
+
+      ctx.setLineDash([])
 
       if (showLabels) {
         const label = box.confidence != null
@@ -194,6 +213,8 @@ export default function ImageCanvas({ src, boxes, onAddBox, onRemoveBox, isCropp
       }
     })
 
+    ctx.setLineDash([])
+    
     // draw box while dragging
     if (currentBox) {
       ctx.strokeStyle = classes[currentSet][currentClass].color

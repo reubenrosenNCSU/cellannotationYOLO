@@ -1014,6 +1014,7 @@ def detect():
     threshold = float(data.get('threshold', 0.5))
     cell_diameter = float(data.get('cell_diameter', 34))
     sublabel = data.get('sublabel', '')
+    selected_classes = data.get('selected_classes', None)
 
     try:
         # Fetch records and verify ownership
@@ -1024,6 +1025,13 @@ def detect():
             return jsonify({"error": "Image not found or unauthorized"}), 404
         if not model_record:
             return jsonify({"error": "Model details not found or unauthorized"}), 404
+
+        allowed_class_indices = None
+        if selected_classes is not None:
+            allowed_class_indices = set()
+            for idx, label_obj in enumerate(model_record.label_set.labels):
+                if label_obj.get('name') in selected_classes:
+                    allowed_class_indices.add(idx)
 
         # Use normalized_path if it exists to preserve custom normalization adjustments
         base_image_path = os.path.join('data', image_record.normalized_path)
@@ -1089,6 +1097,10 @@ def detect():
                 continue
             parts = line.strip().split(' ')
             cls = int(parts[0])
+            
+            if allowed_class_indices is not None and cls not in allowed_class_indices:
+                continue
+
             cx = float(parts[1])
             cy = float(parts[2])
             w = float(parts[3])
