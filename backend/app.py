@@ -1011,6 +1011,7 @@ def detect():
 
     image_id = data['image_id']
     model_id = data['model_id']
+    annotation_id = data['annotation_id']
     threshold = float(data.get('threshold', 0.5))
     cell_diameter = float(data.get('cell_diameter', 34))
     sublabel = data.get('sublabel', '')
@@ -1055,19 +1056,13 @@ def detect():
         )
 
         existing_annotation = Annotation.query.filter_by(
-            image_id=image_id,
-            weights_id=model_id, 
-            user_id=g.user.id ,
-            threshold=threshold,
-            cell_diameter=cell_diameter,
-            sublabel=sublabel
+            id=annotation_id
         ).first()
         
 
         if existing_annotation:
             full_path = existing_annotation.file_path
             target_record = existing_annotation
-            annotation_id = existing_annotation.id
         else:
             unique_id = str(uuid.uuid4())
             annotation_dir = g.user.get_path('annotations')
@@ -1159,6 +1154,174 @@ def detect():
         print(f"Detection runtime exception: {error_details}")
         return jsonify({'error': str(e), 'traceback': error_details}), 500
 
+
+@app.route('/batch-detect', methods=['POST'])
+def batch_detect():
+    if not g.user:
+        return jsonify({"error": "No active session"}), 401
+
+    data = request.get_json()
+    if not data or 'image_set_id' not in data or 'model_id' not in data:
+        return jsonify({"error": "Missing image_set_id or model_id in request body"}), 400
+
+    image_set_id = data['image_set_id']
+    model_id = data['model_id']
+    threshold = float(data.get('threshold', 0.5))
+    cell_diameter = float(data.get('cell_diameter', 34))
+    sublabel = data.get('sublabel', '')
+    selected_classes = data.get('selected_classes', None)
+
+    try:
+        # Fetch the image set and verify ownership
+        image_set = ImageSet.query.filter_by(id=image_set_id, user_id=g.user.id).first()
+        if not image_set:
+            return jsonify({"error": "Image set not found or unauthorized"}), 404
+
+        model_record = Weights.query.filter_by(id=model_id, user_id=g.user.id).first()
+        if not model_record:
+            return jsonify({"error": "Model not found or unauthorized"}), 404
+
+        allowed_class_indices = None
+        if selected_classes is not None:
+            allowed_class_indices = set()
+            for idx, label_obj in enumerate(model_record.label_set.labels):
+                if label_obj.get('name') in selected_classes:
+                    allowed_class_indices.add(idx)
+
+        model_path = model_record.file_path
+        detection_type = model_record.name
+        annotation_dir = g.user.get_path('annotations')
+        os.makedirs(os.path.join('data', annotation_dir), exist_ok=True)
+
+        results = []
+
+        for image_record in image_set.images:
+            try:
+                base_image_path = os.path.join('data', image_record.normalized_path)
+
+                prep_data = preprocess_image(
+                    image_path=base_image_path,
+                    detection_type=detection_type,
+                    cell_diameter=cell_diameter,
+                )
+
+                yolo_output = detect_to_yolo(
+                    image_path=prep_data['image_source'],
+                    model_path=model_path,
+                    image_width=prep_data['det_w'],
+                    image_height=prep_data['det_h'],
+                    threshold=threshold,
+                )
+
+                existing_annotation = Annotation.query.filter_by(
+                    image_id=image_record.id,
+                    weights_id=model_id, 
+                    user_id=g.user.id,
+                    threshold=threshold,
+                    cell_diameter=cell_diameter,
+                    sublabel=sublabel
+                ).first()
+
+                if existing_annotation:
+                    full_path = existing_annotation.file_path
+                    target_record = existing_annotation
+                else:
+                    unique_id = str(uuid.uuid4())
+                    full_path = os.path.join('data', annotation_dir, f'{unique_id}.txt')
+                    target_record = Annotation(
+                        id=unique_id,
+                        user_id=g.user.id,
+                        file_path=full_path,
+                        image_id=image_record.id,
+                        weights_id=model_id,
+                        threshold=threshold,
+                        cell_diameter=cell_diameter,
+                        sublabel=sublabel
+                    )
+                    db.session.add(target_record)
+                    annotation_id = unique_id
+
+                yolo_lines = []
+                converted_annotations = []
+                img_w = image_record.width
+                img_h = image_record.height
+
+                for line in yolo_output.split('\n'):
+                    if not line.strip():
+                        continue
+                    parts = line.strip().split(' ')
+                    cls = int(parts[0])
+
+                    if allowed_class_indices is not None and cls not in allowed_class_indices:
+                        continue
+
+                    cx = float(parts[1])
+                    cy = float(parts[2])
+                    w = float(parts[3])
+                    h = float(parts[4])
+                    conf = float(parts[5]) if len(parts) > 5 else None
+
+                    yolo_lines.append(f"{cls} {cx:.6f} {cy:.6f} {w:.6f} {h:.6f}")
+
+                    pixel_w = w * img_w
+                    pixel_h = h * img_h
+                    pixel_x = (cx * img_w) - (pixel_w / 2)
+                    pixel_y = (cy * img_h) - (pixel_h / 2)
+
+                    converted_annotations.append({
+                        "x": pixel_x,
+                        "y": pixel_y,
+                        "w": pixel_w,
+                        "h": pixel_h,
+                        "class": cls,
+                        "confidence": conf,
+                        "is_detected": True,
+                        "sublabel": sublabel
+                    })
+
+                with open(full_path, 'w') as f:
+                    f.write("\n".join(yolo_lines))
+
+                target_record.annotations_detected = converted_annotations
+                target_record.count_detected = len(converted_annotations)
+                flag_modified(target_record, "annotations_detected")
+
+                db.session.commit()
+
+                results.append({
+                    "image_id": image_record.id,
+                    "annotation_id": annotation_id,
+                    "count_detected": len(converted_annotations),
+                    "success": True
+                })
+
+            except Exception as e:
+                db.session.rollback()
+                import traceback
+                print(f"Error processing image {image_record.id}: {traceback.format_exc()}")
+                results.append({
+                    "image_id": image_record.id,
+                    "success": False,
+                    "error": str(e)
+                })
+
+        total = len(results)
+        succeeded = sum(1 for r in results if r["success"])
+
+        return jsonify({
+            "status": "complete",
+            "image_set_id": image_set_id,
+            "total": total,
+            "succeeded": succeeded,
+            "failed": total - succeeded,
+            "results": results
+        })
+
+    except Exception as e:
+        db.session.rollback()
+        import traceback
+        print(f"Batch detect exception: {traceback.format_exc()}")
+        return jsonify({"error": str(e)}), 500
 
 
 # *----------* Fine Tune Endpoints *----------* #
@@ -1821,161 +1984,6 @@ def train_saved_data():
     except Exception as e:
         print(f"[ERROR] /train-saved exception: {e}")
         return jsonify({'error': str(e)}), 500
-
-
-@app.route('/batch-detect', methods=['POST']) #TODO: Update
-def batch_detect():
-    user_id = session.get('user_id')
-    if not user_id:
-        return jsonify({'error': 'No active user session'}), 400
-
-    upload_dir = os.path.join('users', user_id, 'uploads')
-    final_dir = os.path.join('users', user_id, 'finaloutput')
-
-    try:
-        # 1) Save uploaded files into a temp per-user directory
-        batch_dir = os.path.join('users', user_id, 'batch_temp')
-        os.makedirs(batch_dir, exist_ok=True)
-        # clear existing files
-        clear_folder(batch_dir)
-
-        uploaded_files = request.files.getlist('images')
-        if not uploaded_files:
-            return jsonify({'error': 'No images uploaded for batch.'}), 400
-
-        for f in uploaded_files:
-            fname = secure_filename(f.filename)
-            if not fname:
-                continue
-            f.save(os.path.join(batch_dir, fname))
-
-        # 2) Read form params
-        detection_type = request.form.get('detection_type', 'SGN')
-        threshold = float(request.form.get('threshold', 0.5))
-        cell_diameter = float(request.form.get('cell_diameter', 34))
-        custom_model_file = request.files.get('custom_model')
-
-        model_path = None
-        if detection_type == 'custom' and custom_model_file:
-            cp = os.path.join(batch_dir, 'custom_model.pt')
-            custom_model_file.save(cp)
-            model_path = cp
-
-        # 3) Process images one-by-one and collect results
-        results = []
-        model_map = {
-            'SGN': 'snapshots/SGN_best.pt',
-            'MADM': 'snapshots/MADM_best_latest.pt',
-            'CD3': 'snapshots/cd3_v3.pt'
-        }
-        active_model = model_path or model_map.get(detection_type)
-
-        for fname in sorted(os.listdir(batch_dir)):
-            if fname == 'custom_model.pt':
-                continue
-            input_path = os.path.join(batch_dir, fname)
-            if not os.path.isfile(input_path):
-                continue
-            if not fname.lower().endswith(('.tif', '.tiff', '.png', '.jpg', '.jpeg')):
-                continue
-
-            try:
-                # 1. Preprocess: handles 16-bit to 8-bit normalization and physical scaling
-                #prep_data = preprocess_image(input_path, upload_dir, detection_type, cell_diameter)
-                
-                # 2. SAHI Detection: replaces the split/detect/merge subprocesses
-                final_annotation = detect_to_yolo(
-                    image_path=prep_data['path'],
-                    model_path=active_model,
-                    image_width=prep_data['det_w'],
-                    image_height=prep_data['det_h'],
-                    threshold=threshold
-                )
-
-                # 3. Create the final "Safe" TIFF (Scaled but NOT normalized)
-                base_name = os.path.splitext(fname)[0]
-                out_uuid = uuid.uuid4().hex[:8]
-                out_base = f"{base_name}_scaled_{int(cell_diameter)}_{out_uuid}"
-                
-                final_img_path = os.path.join(final_dir, out_base + ".png")
-                final_txt_path = os.path.join(final_dir, out_base + ".txt")
-
-                import shutil
-                if os.path.exists(prep_data['path']):
-                    shutil.move(prep_data['path'], final_img_path)
-
-                with open(final_txt_path, 'w') as f:
-                    f.write(final_annotation)
-
-                # Clean up the temporary normalized detection PNG
-                if os.path.exists(prep_data['path']):
-                    os.remove(prep_data['path'])
-
-                results.append({
-                    'success': True,
-                    'original_filename': fname,
-                    'tiff_path': final_img_path,
-                    'txt_path': final_txt_path,
-                    'det_width': prep_data['det_w'],
-                    'det_height': prep_data['det_h']
-                })
-
-            except Exception as e:
-                results.append({
-                    'success': False,
-                    'original_filename': fname,
-                    'error': str(e)
-                })
-            # res = batch_process_image_yolo(user_id, input_path, detection_type, threshold, model_path=model_path, cell_diameter=cell_diameter)
-            # # add original filename for diagnostics
-            # res['original_filename'] = fname
-            # results.append(res)
-
-        # 4) Build ZIP with exact pairs: tiff + matching .txt (or an error file for failures)
-        zip_buffer = io.BytesIO()
-        with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zf:
-            for res in results:
-                orig = res.get('original_filename', 'unknown')
-                if not res.get('success'):
-                    err_name = os.path.splitext(orig)[0] + '_ERROR.txt'
-                    zf.writestr(err_name, res.get('error', 'processing error'))
-                    continue
-
-                tiff_path = res.get('tiff_path')
-                txt_path = res.get('txt_path')
-
-                # defensive existence checks
-                if tiff_path and os.path.exists(tiff_path):
-                    zf.write(tiff_path, os.path.basename(tiff_path))
-                else:
-                    # include a small note if the TIFF is missing
-                    zf.writestr(os.path.splitext(orig)[0] + '_MISSING_TIFF.txt', f"Missing TIFF for {orig}")
-
-                if txt_path and os.path.exists(txt_path):
-                    zf.write(txt_path, os.path.basename(txt_path))
-                else:
-                    zf.writestr(os.path.splitext(orig)[0] + '_MISSING_TXT.txt', f"Missing TXT for {orig}")
-
-        zip_buffer.seek(0)
-
-        # 5) Cleanup temp upload folder (keep finaloutput intact)
-        try:
-            shutil.rmtree(batch_dir, ignore_errors=True)
-        except Exception:
-            pass
-
-        return send_file(
-            zip_buffer,
-            mimetype='application/zip',
-            as_attachment=True,
-            download_name='batch_results.zip'
-        )
-
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-    
-
 
 @app.route('/snapshots/<path:filename>') #TODO: Remove
 def serve_snapshot(filename):

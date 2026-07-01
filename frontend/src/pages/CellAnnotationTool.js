@@ -102,6 +102,8 @@ export default function CellAnnotationTool() {
   const [batchThumbnails, setBatchThumbnails] = useState({})
   const [annotationsOnly, setAnnotationsOnly] = useState(false)
   const [showLabels, setShowLabels] = useState(true)
+  const [batchImageSetId, setBatchImageSetId] = useState('')
+  const [batchSelectedRowIds, setBatchSelectedRowIds] = useState([])
 
   const fileKey = (file) => `${file.name}-${file.size}-${file.lastModified}`
   // State for fine tuning
@@ -211,15 +213,18 @@ export default function CellAnnotationTool() {
       const defaultLabels = data[0]?.label_set?.labels
       ? data[0].label_set.labels.map(label => label.name) // Extracts ['neuron', 'glia']
       : []
+
+      const tempId = generateId()
       setDetectionSettings([
         {
-          id: generateId(),
+          id: tempId,
           selectedModelId: data[0]?.id,
           selectedClasses: defaultLabels,
           rowThreshold: 0.5,
           rowDiameter: 34
         }
       ])
+      setActiveRowIds(tempId)
     })
   }
 
@@ -617,6 +622,7 @@ export default function CellAnnotationTool() {
       })
       if (!res.ok) throw new Error('Delete failed')
       if (image_id = imageID) {
+        loadImageSets()
         setImageID('')
         setImageName('')
         setImageURL('')
@@ -1001,6 +1007,7 @@ export default function CellAnnotationTool() {
       const payload = {
         image_id: imageID,
         model_id: row.selectedModelId,
+        annotation_id: tempRowId,
         threshold: row.rowThreshold,
         cell_diameter: row.rowDiameter,
         sublabel: row.rowSublabel,
@@ -1028,7 +1035,8 @@ export default function CellAnnotationTool() {
           annotation_id: targetId,
           is_detected: true,
           name: data.labels.labels[box.class].name,
-          color: data.labels.labels[box.class].color
+          color: data.labels.labels[box.class].color,
+          renderStyle: 'dashed'
         }))
         setAnnotations((prevAnnotations) => {
           const exists = prevAnnotations.some(
@@ -1061,6 +1069,9 @@ export default function CellAnnotationTool() {
         setDetectionSettings((prevRows) =>
           prevRows.map((r) => r.id === tempRowId ? { ...r, id: targetId } : r)
         )
+        setActiveRowIds((prevActive) => 
+          prevActive.map((id) => id === tempRowId ? targetId : id)
+        )
       } catch (e) {
         alert('Detection failed: ' + (e.response?.data?.error || e.message))
       } finally {
@@ -1070,58 +1081,47 @@ export default function CellAnnotationTool() {
   }
 
   async function handleBatchDetect() {
-    if (selectedFiles.length === 0) return alert('Please select images!');
+    if (!batchImageSetId) return alert('Please select an image set.')
+    
+    const detectionRows = detectionSettings.filter(r => batchSelectedRowIds.includes(r.id))
+    if (detectionRows.length === 0) return alert('Please select at least one detection row.')
 
-    const formData = new FormData();
-
-    if (currentModel_old === 0) {
-      formData.append('detection_type', 'SGN')
-    } else if (currentModel_old === 1) {
-      formData.append('detection_type', 'CD3')
-    } else if (currentModel_old === 2) {
-      formData.append('detection_type', 'MADM')
-    } else if (currentModel_old === 3) {
-      if (!customModel) {
-        alert('Please upload a custom model (.pt)')
-        return
-      }
-      formData.append('detection_type', 'custom')
-      formData.append('custom_model', customModel)
-      formData.append('model_type', customModelType)
-    } else {
-      console.log('Invalid Model Selection')
-      return
-    }
-
-    formData.append('threshold', threshold)
-    formData.append('cell_diameter', cellDiameter)
-    selectedFiles.forEach(file => formData.append('images', file));
+    setBatchDetectModalOpen(false)
     setIsLoading(true)
+
     try {
-      const res = await fetch(`${API_BASE_URL}/batch-detect`, {
-        method: 'POST',
-        body: formData,
-        credentials: 'include',
-      });
+      const batchResults = []
 
-      if (!res.ok) throw new Error(`${models_old[currentModel_old]} batch detection failed`)
-      
-      const blob = await res.blob()
-      const url = window.URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = url
-      a.download = 'batch_results.zip'
-      document.body.appendChild(a)
-      a.click()
+      for (const row of detectionRows) {
+        const payload = {
+          image_set_id: batchImageSetId,
+          model_id: row.selectedModelId,
+          threshold: row.rowThreshold,
+          cell_diameter: row.rowDiameter,
+          sublabel: row.rowSublabel,
+          selected_classes: row.selectedClasses,
+        }
 
-      document.body.removeChild(a)
-      window.URL.revokeObjectURL(url)
+        const res = await fetch(`${API_BASE_URL}/batch-detect`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+          credentials: 'include',
+        })
 
-      setSelectedFiles([])
+        if (!res.ok) throw new Error(`Batch detection failed for model ${row.selectedModelId}`)
+        const data = await res.json()
+        batchResults.push(data)
+      }
 
-    } catch (error) {
-      console.error(error);
-      alert(`Error: ${error.message}`)
+      const total = batchResults.reduce((sum, r) => sum + (r.total || 0), 0)
+      const succeeded = batchResults.reduce((sum, r) => sum + (r.succeeded || 0), 0)
+      const failed = batchResults.reduce((sum, r) => sum + (r.failed || 0), 0)
+      alert(`Batch complete: ${succeeded}/${total} images succeeded${failed > 0 ? `, ${failed} failed` : ''}.`)
+
+    } catch (err) {
+      console.error(err)
+      alert(`Batch detection error: ${err.message}`)
     } finally {
       setIsLoading(false)
     }
@@ -1632,6 +1632,13 @@ export default function CellAnnotationTool() {
 
   const [exportModalOpen, setExportModalOpen] = useState(false)
   const [clearModalOpen, setClearModalOpen] = useState(false)
+  const [batchDetectModalOpen, setBatchDetectModalOpen] = useState(false)
+  function handleOpenBatchDetectModal() {
+    setBatchSelectedRowIds(detectionSettings.map(r => r.id))
+    setBatchImageSetId('')
+    setBatchDetectModalOpen(true)
+  }
+  
   // const [images] = useState([
   //   { url: 'https://picsum.photos/200/300?random=1', id: 1 },
   //   { url: 'https://picsum.photos/200/300?random=2', id: 2 },
@@ -1680,7 +1687,7 @@ export default function CellAnnotationTool() {
     }
   }
 
-  const [detectionSettings, setDetectionSettings] = useState([createEmptyRow()])
+  const [detectionSettings, setDetectionSettings] = useState([])
 
   const handleRowChange = (index, fieldName, value) => {
     setDetectionSettings((prevRows) => {
@@ -1923,9 +1930,6 @@ export default function CellAnnotationTool() {
             
             
           </Box>
-          <Button variant='contained' component='label' onClick={detect} sx={{...button_style_span}}>
-            Single Detect
-          </Button>
           <Box sx={{pt: 1, borderTop: 1, borderColor: 'grey.500'}}>
             <Typography variant='body1' sx={{ fontWeight: 'bold' }}>
               Fine Tuned Detection
@@ -2422,7 +2426,7 @@ export default function CellAnnotationTool() {
                 onClick={() => setExportModalOpen(true)}
                 sx={{ p: 1.5 }}
               >
-                <FileDownloadIcon />
+                <FileUploadIcon />
               </IconButton>
             </Tooltip>
             <Modal
@@ -2502,7 +2506,7 @@ export default function CellAnnotationTool() {
                 color="primary" 
                 sx={{ p: 1.5 }}
               >
-                <FileUploadIcon />
+                <FileDownloadIcon />
                 <input hidden type="file" accept=".txt" onChange={importAnnotations}/>
               </IconButton>
             </Tooltip>
@@ -2841,6 +2845,184 @@ export default function CellAnnotationTool() {
             <Button variant='contained' component='label' onClick={() => setCalibratorOpen(true)} sx={{...button_style_span}}>
               Calibrate Cell Size
             </Button>
+            <Button variant='contained' component='label' onClick={detect} sx={{...button_style_span}}>
+              Single Detect
+            </Button>
+            <Tooltip title="Batch Detect" arrow>
+              <IconButton
+                color="primary"
+                onClick={handleOpenBatchDetectModal}
+                sx={{ p: 1.5 }}
+              >
+                <DriveFolderUploadIcon />
+              </IconButton>
+            </Tooltip>
+            <Modal
+              open={batchDetectModalOpen}
+              onClose={() => setBatchDetectModalOpen(false)}
+              sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+            >
+              <Box
+                sx={{
+                  width: '100%',
+                  maxWidth: 500,
+                  bgcolor: 'background.paper',
+                  borderRadius: 2,
+                  boxShadow: 24,
+                  p: 3,
+                  outline: 'none',
+                  maxHeight: '85vh',
+                  overflowY: 'auto',
+                }}
+              >
+                {/* Header */}
+                <Box display="flex" justifyContent="space-between" alignItems="center" sx={{ mb: 2 }}>
+                  <Typography variant="h6" sx={{ fontWeight: 'bold' }}>
+                    Batch Detection
+                  </Typography>
+                  <IconButton onClick={() => setBatchDetectModalOpen(false)} size="small">
+                    <CloseIcon />
+                  </IconButton>
+                </Box>
+
+                <Divider sx={{ mb: 2 }} />
+
+                {/* Detection Rows */}
+                <Typography variant="body2" sx={{ fontWeight: 600, mb: 1 }}>
+                  Detection Rows
+                </Typography>
+                {detectionSettings.length === 0 ? (
+                  <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                    No detection rows configured. Add rows in the sidebar first.
+                  </Typography>
+                ) : (
+                  <Box sx={{ mb: 3 }}>
+                    {detectionSettings.map((row) => {
+                      const rowModel = models.find(m => m.id === row.selectedModelId)
+                      const isChecked = batchSelectedRowIds.includes(row.id)
+                      return (
+                        <Box
+                          key={row.id}
+                          display="flex"
+                          alignItems="center"
+                          sx={{
+                            px: 1.5,
+                            py: 1,
+                            mb: 0.5,
+                            borderRadius: 1,
+                            border: '1px solid',
+                            borderColor: isChecked ? 'primary.main' : 'divider',
+                            bgcolor: isChecked ? 'primary.50' : 'transparent',
+                            cursor: 'pointer',
+                            transition: 'all 0.15s ease',
+                          }}
+                          onClick={() =>
+                            setBatchSelectedRowIds(prev =>
+                              isChecked ? prev.filter(id => id !== row.id) : [...prev, row.id]
+                            )
+                          }
+                        >
+                          <Checkbox
+                            checked={isChecked}
+                            size="small"
+                            sx={{ p: 0, mr: 1.5 }}
+                            onClick={e => e.stopPropagation()}
+                            onChange={() =>
+                              setBatchSelectedRowIds(prev =>
+                                isChecked ? prev.filter(id => id !== row.id) : [...prev, row.id]
+                              )
+                            }
+                          />
+                          <Box sx={{ flexGrow: 1 }}>
+                            <Typography variant="body2" sx={{ fontWeight: 500 }}>
+                              {rowModel?.name || 'Unknown model'}
+                              {row.rowSublabel ? ` · ${row.rowSublabel}` : ''}
+                            </Typography>
+                            <Typography variant="caption" color="text.secondary">
+                              Threshold {row.rowThreshold} · Ø {row.rowDiameter}px
+                              {row.selectedClasses?.length > 0 ? ` · ${row.selectedClasses.join(', ')}` : ''}
+                            </Typography>
+                          </Box>
+                        </Box>
+                      )
+                    })}
+                  </Box>
+                )}
+
+                {/* Image Set Picker */}
+                <Typography variant="body2" sx={{ fontWeight: 600, mb: 1 }}>
+                  Image Set
+                </Typography>
+                {imageSets.length === 0 ? (
+                  <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
+                    No image sets available. Create one from the image sets menu.
+                  </Typography>
+                ) : (
+                  <Box sx={{ mb: 3 }}>
+                    {imageSets.map((set) => {
+                      const isSelected = batchImageSetId === set.id
+                      return (
+                        <Box
+                          key={set.id}
+                          display="flex"
+                          alignItems="center"
+                          sx={{
+                            px: 1.5,
+                            py: 1,
+                            mb: 0.5,
+                            borderRadius: 1,
+                            border: '1px solid',
+                            borderColor: isSelected ? 'primary.main' : 'divider',
+                            bgcolor: isSelected ? 'primary.50' : 'transparent',
+                            cursor: 'pointer',
+                            transition: 'all 0.15s ease',
+                          }}
+                          onClick={() => setBatchImageSetId(set.id)}
+                        >
+                          <Box
+                            sx={{
+                              width: 16,
+                              height: 16,
+                              borderRadius: '50%',
+                              border: '2px solid',
+                              borderColor: isSelected ? 'primary.main' : 'text.disabled',
+                              bgcolor: isSelected ? 'primary.main' : 'transparent',
+                              mr: 1.5,
+                              flexShrink: 0,
+                              transition: 'all 0.15s ease',
+                            }}
+                          />
+                          <Box sx={{ flexGrow: 1 }}>
+                            <Typography variant="body2" sx={{ fontWeight: 500 }}>
+                              {set.name}
+                            </Typography>
+                            <Typography variant="caption" color="text.secondary">
+                              {set.image_count} image{set.image_count !== 1 ? 's' : ''}
+                            </Typography>
+                          </Box>
+                        </Box>
+                      )
+                    })}
+                  </Box>
+                )}
+
+                <Divider sx={{ mb: 2 }} />
+
+                {/* Footer */}
+                <Box display="flex" justifyContent="flex-end" gap={1.5}>
+                  <Button variant="outlined" onClick={() => setBatchDetectModalOpen(false)}>
+                    Cancel
+                  </Button>
+                  <Button
+                    variant="contained"
+                    disabled={!batchImageSetId || batchSelectedRowIds.length === 0}
+                    onClick={handleBatchDetect}
+                  >
+                    Run Batch ({batchSelectedRowIds.length} row{batchSelectedRowIds.length !== 1 ? 's' : ''})
+                  </Button>
+                </Box>
+              </Box>
+            </Modal>
           </Box>
           
           <TabMenu items={tabs}></TabMenu>
