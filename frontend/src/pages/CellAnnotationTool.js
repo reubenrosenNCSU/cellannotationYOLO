@@ -12,14 +12,15 @@ import AddIcon from '@mui/icons-material/Add'
 import DeleteIcon from '@mui/icons-material/Delete'
 import CloseIcon from '@mui/icons-material/Close'
 import FolderOpenIcon from '@mui/icons-material/FolderOpen'
-import CloudUploadIcon from '@mui/icons-material/CloudUpload'
+import ImageSearch from '@mui/icons-material/ImageSearch'
+import ScreenSearchDesktop from '@mui/icons-material/ScreenSearchDesktop'
 import CollectionsIcon from '@mui/icons-material/Collections'
 import SaveAsIcon from '@mui/icons-material/SaveAs'
 import FileDownloadIcon from '@mui/icons-material/FileDownload'
 import FileUploadIcon from '@mui/icons-material/FileUpload'
 import DeleteSweepIcon from '@mui/icons-material/DeleteSweep'
 import DriveFolderUploadIcon from '@mui/icons-material/DriveFolderUpload';
-import WarningAmberIcon from '@mui/icons-material/WarningAmber'
+import SquareFoot from '@mui/icons-material/SquareFoot'
 import VisibilityIcon from '@mui/icons-material/Visibility'
 import VisibilityOffIcon from '@mui/icons-material/VisibilityOff'
 import SaveIcon from '@mui/icons-material/Save'
@@ -1769,336 +1770,6 @@ export default function CellAnnotationTool() {
     console.log(detectionSettings)
   }, [detectionSettings])
 
-  const tabs = [
-		{
-			label: 'Annotate',
-			content: (
-        <Box>
-          
-          <Box sx={{pt: 1, borderTop: 1, borderColor: 'grey.500'}}>
-            <Typography gutterBottom variant='body1' sx={{ fontWeight: 'bold' }}>
-              Train / Fine Tune
-            </Typography>
-            <Button variant='contained' component='label' onClick={saveTrainingData} sx={{...button_style_span}}>
-              Save Training Data
-            </Button>
-            <Button variant='contained' component='label' onClick={clearTrainingData} sx={{...button_style_span, bgcolor: 'error.dark', '&:hover': { bgcolor: 'error.light' }}}>
-              Clear Training Data
-            </Button>
-            <Button variant='contained' component='label' onClick={handleOpenFineTuneModal} sx={{...button_style_span}}>
-              Fine Tune
-            </Button>
-            <Modal
-              open={fineTuneModalOpen}
-              onClose={handleCloseFineTuneModal}
-            >
-              <Box sx={{...modal_style}}>
-                <Typography>Train with Saved Data</Typography>
-                <Box display='flex' flexDirection='row'>
-                  <Box sx={{width: '50%', display: 'flex', flexDirection: 'column', mr: 1, mb: 'auto'}}>
-                    <TextField
-                      value={preTrainImages}
-                      onChange={(e) => setPreTrainImages(Number(e.target.value))}
-                      type='number'
-                      variant='outlined'
-                      size='small'
-                      slotProps={{ 
-                        htmlInput: {
-                          step: 1,
-                          min: 0,
-                          max: maxImages
-                        }
-                      }}
-                      sx={{...button_style_span}}
-                    />
-                    <Typography gutterBottom variant='body2' sx={{ fontWeight: 'bold' }}>
-                      Pre-train images (0-7 for SGN, 0-278 for MADM)
-                    </Typography>
-                  </Box>
-                  <Box sx={{width: '50%', display: 'flex', flexDirection: 'column', mr: 1, mb: 'auto'}}>
-                    <TextField
-                      value={epochs}
-                      onChange={(e) => setEpochs(Number(e.target.value))}
-                      type='number'
-                      variant='outlined'
-                      size='small'
-                      slotProps={{ 
-                        htmlInput: {
-                          step: 1,
-                          min: 0
-                        }
-                      }}
-                      sx={{...button_style_span}}
-                    />
-                    <Typography gutterBottom variant='body2' sx={{ fontWeight: 'bold' }}>
-                      Epochs
-                    </Typography>
-                  </Box>
-                </Box>
-                <PopupState variant='popover' popupId='model-popup-menu'>
-                  {(popupState) => (
-                    <Fragment>
-                      <Button variant='contained' {...bindTrigger(popupState)} endIcon={<KeyboardArrowDownIcon />} sx={{...button_style_span, mt: 1}}>
-                        {fineTuneModels[currentFineTuneModel]}
-                      </Button>
-                      <Menu {...bindMenu(popupState)}>
-                        {fineTuneModels.map((item, index) => (
-                          <MenuItem 
-                            key={index}
-                            onClick={() => {setCurrentFineTuneModel(index); if (index === 0) {setMaxImages(7)} else{setMaxImages(278)}}}
-                          >
-                              <Typography variant='body1'>{item}</Typography>
-                          </MenuItem>
-                        ))}
-                      </Menu>
-                    </Fragment>
-                  )}
-                </PopupState>
-                <Button onClick={fineTune}>Start Training</Button>
-                <Button onClick={handleCloseFineTuneModal}>Cancel</Button>
-              </Box>
-            </Modal>
-            <Modal
-              open={fineTuneDownloadModalOpen}
-              onClose={handleCloseFineTuneDownloadModal}
-            >
-              <Box sx={{...modal_style}}>
-                <Typography sx={{ whiteSpace: 'pre-wrap' }}>{kFoldResults}</Typography>
-                {fineTuneModelURL && (
-                  <Button 
-                    variant="contained" 
-                    color="primary"
-                    onClick={handleModelDownload}
-                    sx={{ mt: 2 }} // 'mt: 2' is MUI shorthand for marginTop: 16px
-                    startIcon={<DownloadIcon />} // Optional: adds a nice download icon
-                  >
-                    Download Trained Model (.pt)
-                  </Button>
-                )}
-                <Button onClick={handleCloseFineTuneDownloadModal}>
-                  Close
-                </Button>
-              </Box>
-            </Modal>
-            <Button variant='contained' component='label' onClick={handleOpenTrainingMetricsModal} sx={{...button_style_span}}>
-              Training Metrics
-            </Button>
-            <Modal
-              open={trainingMetricsModalOpen}
-              onClose={handleCloseTrainingMetricsModal}
-            >
-              <Box sx={{...modal_style}}>
-                {metricsData && Object.keys(metricsData).length > 0 ? (
-                  <MetricsChart data={metricsData} />
-                ) : (
-                  <Typography>No training metrics available yet.</Typography>
-                )}
-                <Button onClick={handleCloseTrainingMetricsModal}>
-                  Close
-                </Button>
-              </Box>
-            </Modal>
-          </Box>
-        </Box>
-			),
-		},
-		{
-			label: 'Detect',
-			content: (
-        <Box>
-          {/* <Typography gutterBottom variant='body2' sx={{ fontWeight: 'bold' }}>
-            Selected Model: {customModelFilename}
-          </Typography>
-          <Typography gutterBottom variant='body2' sx={{ fontWeight: 'bold' }}>
-            Model Type: {lastCustomModelType}
-          </Typography> */}
-          <Box sx={{pt: 1}}>
-            <Typography gutterBottom variant='body1' sx={{ fontWeight: 'bold' }}>
-              Detection Settings
-            </Typography>
-            <Button variant='contained' component='label' onClick={handleOpenDetectionSettingsModal} sx={{...button_style_span}}>
-              Edit Settings
-            </Button>
-            <Modal
-              open={detectionSettingsModalOpen}
-              onClose={handleCloseDetectionSettingsModal}
-            >
-              <Box sx={{...modal_style, width: 800,}}>
-                <Typography variant="h5" gutterBottom>Detection Settings</Typography>
-                <Paper variant="outlined" sx={{ p: 3, mb: 4 }}>
-                </Paper>
-              </Box>
-            </Modal>
-            
-            
-          </Box>
-          <Box sx={{pt: 1, borderTop: 1, borderColor: 'grey.500'}}>
-            <Typography variant='body1' sx={{ fontWeight: 'bold' }}>
-              Fine Tuned Detection
-            </Typography>
-            <PopupState variant='popover' popupId='model-popup-menu'>
-              {(popupState) => (
-                <Fragment>
-                  <Button variant='contained' {...bindTrigger(popupState)} endIcon={<KeyboardArrowDownIcon />} sx={{...button_style_span, mt: 1}}>
-                    {fineTuneModels[currentFineTuneModel]}
-                  </Button>
-                  <Menu {...bindMenu(popupState)}>
-                    {fineTuneModels.map((item, index) => (
-                      <MenuItem 
-                        key={index}
-                        onClick={() => {setCurrentFineTuneModel(index)}}
-                      >
-                          <Typography variant='body1'>{item}</Typography>
-                      </MenuItem>
-                    ))}
-                  </Menu>
-                </Fragment>
-              )}
-            </PopupState>
-            <Button variant='contained' component='label' onClick={handleFineTuneDetect} sx={{...button_style_span}}>
-              Fine Tuned Detect
-            </Button>
-          </Box>
-        </Box>
-      )
-		}
-	]
-
-  const dataTabs = [
-    {
-      label: 'Training',
-      content: (
-        <Box>
-          <Typography>Saved Training Data</Typography>
-          <Typography gutterBottom variant='body2' sx={{ fontWeight: 'bold' }}>
-            Current Saved Cells: {savedAnnotationCount}
-          </Typography>
-          <Button 
-            variant="contained" 
-            color="primary"
-            onClick={handleTrainingDataDownload}
-            sx={{ mt: 2 }} // 'mt: 2' is MUI shorthand for marginTop: 16px
-            startIcon={<DownloadIcon />} // Optional: adds a nice download icon
-          >
-            Download Training Data (.zip)
-          </Button>
-          {trainingData.map((item, index) => {
-            const uniqueId = item.annotationName.replace('.txt', '')
-
-            return (
-              <Box key={index} sx={{ textAlign: 'center' }}>
-                <Box
-                  component="img"
-                  src={`${API_BASE_URL}${item.thumbnailUrl}`} // Matches your newEntry key
-                  alt="preview"
-                  onClick={() => loadSavedEntry(item)}
-                  sx={{
-                    width: 150,
-                    height: 150,
-                    border: '1px solid black',
-                    cursor: 'pointer', 
-                    '&:hover': { opacity: 0.8, border: '1px solid #1976d2' },
-                    mb: 2,
-                    p: 1,
-                    borderRadius: 1
-                  }}
-                />
-                <Typography variant="caption" sx={{ display: 'block' }}>
-                  {/* Use imageName instead of name, and add a check */}
-                  {item.imageName ? item.imageName.substring(0, 10) : 'N/A'}...
-                </Typography>
-                {/* Quick Delete Button */}
-                <button 
-                  onClick={() => deleteTrainingDataEntry(uniqueId)}
-                  style={{ color: 'red', cursor: 'pointer', fontSize: '10px' }}
-                >
-                  Delete
-                </button>
-              </Box>
-            )
-          })}
-        </Box>
-      )
-    },
-    {
-      label: 'Batch Images',
-      content: (
-        <Box>
-          <PopupState variant='popover' popupId='batch-model-popup-menu'>
-            {(popupState) => (
-              <Fragment>
-                <Button variant='contained' {...bindTrigger(popupState)} endIcon={<KeyboardArrowDownIcon />} sx={{ ...button_style_span, mt: 1 }}>
-                  {models_old[currentModel_old]}
-                </Button>
-                <Menu {...bindMenu(popupState)}>
-                  {models_old.map((item, index) => (
-                    <MenuItem key={index} onClick={() => setCurrentModel_old(index)}>
-                      <Typography variant='body1'>{item}</Typography>
-                    </MenuItem>
-                  ))}
-                </Menu>
-              </Fragment>
-            )}
-          </PopupState>
-          <Button variant='contained' component='label' sx={{ ...button_style_span, mt: 1 }}>
-            Add Images
-            <input hidden type='file' multiple accept='image/tiff' onChange={addToBatch} />
-          </Button>
-          <Button
-            variant='contained'
-            onClick={handleBatchDetect}
-            disabled={selectedFiles.length === 0}
-            sx={{ ...button_style_span }}
-          >
-            Process Batch ({selectedFiles.length})
-          </Button>
-          {selectedFiles.map((file, index) => (
-            <Box key={index} sx={{ textAlign: 'center' }}>
-              {batchThumbnails[fileKey(file)] ? (
-                <Box
-                  component="img"
-                  src={batchThumbnails[fileKey(file)]}
-                  alt="preview"
-                  sx={{
-                    width: 150,
-                    height: 150,
-                    border: '1px solid black',
-                    mb: 2,
-                    p: 1,
-                    borderRadius: 1,
-                    objectFit: 'contain',
-                  }}
-                />
-              ) : (
-                <Box sx={{
-                  width: 150,
-                  height: 150,
-                  border: '1px solid black',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  mb: 2,
-                  borderRadius: 1,
-                }}>
-                  <Typography variant="caption">Loading...</Typography>
-                </Box>
-              )}
-              <Typography variant="caption" sx={{ display: 'block' }}>
-                {file.name.length > 20 ? `${file.name.substring(0, 20)}...` : file.name}
-              </Typography>
-              <button
-                onClick={() => removeFromBatch(index)}
-                style={{ color: 'red', cursor: 'pointer', fontSize: '10px' }}
-              >
-                Remove
-              </button>
-            </Box>
-          ))}
-        </Box>
-      )
-    }
-  ]
-
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', height: '100vh', width: '100vw', overflow: 'hidden' }}>
       
@@ -2844,190 +2515,205 @@ export default function CellAnnotationTool() {
                 )
               }}
             />
-            <Button variant='contained' component='label' onClick={() => setCalibratorOpen(true)} sx={{...button_style_span}}>
-              Calibrate Cell Size
-            </Button>
-            <Button variant='contained' component='label' onClick={detect} sx={{...button_style_span}}>
-              Single Detect
-            </Button>
-            <Tooltip title="Batch Detect" arrow>
-              <IconButton
-                color="primary"
-                onClick={handleOpenBatchDetectModal}
-                sx={{ p: 1.5 }}
+            <Typography variant='body1' sx={{ pt: 1, fontWeight: 'bold' }}>
+              Detection Tools
+            </Typography>
+            <Box sx={{pt: 1, mt: 2, borderTop: 1, borderColor: 'grey.500'}}>
+              <Tooltip title="Calibrate Cell Size" arrow>
+                <IconButton
+                  color="primary"
+                  onClick={() => setCalibratorOpen(true)}
+                  sx={{ p: 1.5 }}
+                >
+                  <SquareFoot />
+                </IconButton>
+              </Tooltip>
+              <Tooltip title="Single Detect" arrow>
+                <IconButton
+                  color="primary"
+                  onClick={detect}
+                  sx={{ p: 1.5 }}
+                >
+                  <ImageSearch />
+                </IconButton>
+              </Tooltip>
+              <Tooltip title="Batch Detect" arrow>
+                <IconButton
+                  color="primary"
+                  onClick={handleOpenBatchDetectModal}
+                  sx={{ p: 1.5 }}
+                >
+                  <ScreenSearchDesktop />
+                </IconButton>
+              </Tooltip>
+              <Modal
+                open={batchDetectModalOpen}
+                onClose={() => setBatchDetectModalOpen(false)}
+                sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}
               >
-                <DriveFolderUploadIcon />
-              </IconButton>
-            </Tooltip>
-            <Modal
-              open={batchDetectModalOpen}
-              onClose={() => setBatchDetectModalOpen(false)}
-              sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-            >
-              <Box
-                sx={{
-                  width: '100%',
-                  maxWidth: 500,
-                  bgcolor: 'background.paper',
-                  borderRadius: 2,
-                  boxShadow: 24,
-                  p: 3,
-                  outline: 'none',
-                  maxHeight: '85vh',
-                  overflowY: 'auto',
-                }}
-              >
-                {/* Header */}
-                <Box display="flex" justifyContent="space-between" alignItems="center" sx={{ mb: 2 }}>
-                  <Typography variant="h6" sx={{ fontWeight: 'bold' }}>
-                    Batch Detection
-                  </Typography>
-                  <IconButton onClick={() => setBatchDetectModalOpen(false)} size="small">
-                    <CloseIcon />
-                  </IconButton>
-                </Box>
+                <Box
+                  sx={{
+                    width: '100%',
+                    maxWidth: 500,
+                    bgcolor: 'background.paper',
+                    borderRadius: 2,
+                    boxShadow: 24,
+                    p: 3,
+                    outline: 'none',
+                    maxHeight: '85vh',
+                    overflowY: 'auto',
+                  }}
+                >
+                  {/* Header */}
+                  <Box display="flex" justifyContent="space-between" alignItems="center" sx={{ mb: 2 }}>
+                    <Typography variant="h6" sx={{ fontWeight: 'bold' }}>
+                      Batch Detection
+                    </Typography>
+                    <IconButton onClick={() => setBatchDetectModalOpen(false)} size="small">
+                      <CloseIcon />
+                    </IconButton>
+                  </Box>
 
-                <Divider sx={{ mb: 2 }} />
+                  <Divider sx={{ mb: 2 }} />
 
-                {/* Detection Rows */}
-                <Typography variant="body2" sx={{ fontWeight: 600, mb: 1 }}>
-                  Detection Rows
-                </Typography>
-                {detectionSettings.length === 0 ? (
-                  <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-                    No detection rows configured. Add rows in the sidebar first.
+                  {/* Detection Rows */}
+                  <Typography variant="body2" sx={{ fontWeight: 600, mb: 1 }}>
+                    Detection Rows
                   </Typography>
-                ) : (
-                  <Box sx={{ mb: 3 }}>
-                    {detectionSettings.map((row) => {
-                      const rowModel = models.find(m => m.id === row.selectedModelId)
-                      const isChecked = batchSelectedRowIds.includes(row.id)
-                      return (
-                        <Box
-                          key={row.id}
-                          display="flex"
-                          alignItems="center"
-                          sx={{
-                            px: 1.5,
-                            py: 1,
-                            mb: 0.5,
-                            borderRadius: 1,
-                            border: '1px solid',
-                            borderColor: isChecked ? 'primary.main' : 'divider',
-                            bgcolor: isChecked ? 'primary.50' : 'transparent',
-                            cursor: 'pointer',
-                            transition: 'all 0.15s ease',
-                          }}
-                          onClick={() =>
-                            setBatchSelectedRowIds(prev =>
-                              isChecked ? prev.filter(id => id !== row.id) : [...prev, row.id]
-                            )
-                          }
-                        >
-                          <Checkbox
-                            checked={isChecked}
-                            size="small"
-                            sx={{ p: 0, mr: 1.5 }}
-                            onClick={e => e.stopPropagation()}
-                            onChange={() =>
+                  {detectionSettings.length === 0 ? (
+                    <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                      No detection rows configured. Add rows in the sidebar first.
+                    </Typography>
+                  ) : (
+                    <Box sx={{ mb: 3 }}>
+                      {detectionSettings.map((row) => {
+                        const rowModel = models.find(m => m.id === row.selectedModelId)
+                        const isChecked = batchSelectedRowIds.includes(row.id)
+                        return (
+                          <Box
+                            key={row.id}
+                            display="flex"
+                            alignItems="center"
+                            sx={{
+                              px: 1.5,
+                              py: 1,
+                              mb: 0.5,
+                              borderRadius: 1,
+                              border: '1px solid',
+                              borderColor: isChecked ? 'primary.main' : 'divider',
+                              bgcolor: isChecked ? 'primary.50' : 'transparent',
+                              cursor: 'pointer',
+                              transition: 'all 0.15s ease',
+                            }}
+                            onClick={() =>
                               setBatchSelectedRowIds(prev =>
                                 isChecked ? prev.filter(id => id !== row.id) : [...prev, row.id]
                               )
                             }
-                          />
-                          <Box sx={{ flexGrow: 1 }}>
-                            <Typography variant="body2" sx={{ fontWeight: 500 }}>
-                              {rowModel?.name || 'Unknown model'}
-                              {row.rowSublabel ? ` · ${row.rowSublabel}` : ''}
-                            </Typography>
-                            <Typography variant="caption" color="text.secondary">
-                              Threshold {row.rowThreshold} · Ø {row.rowDiameter}px
-                              {row.selectedClasses?.length > 0 ? ` · ${row.selectedClasses.join(', ')}` : ''}
-                            </Typography>
+                          >
+                            <Checkbox
+                              checked={isChecked}
+                              size="small"
+                              sx={{ p: 0, mr: 1.5 }}
+                              onClick={e => e.stopPropagation()}
+                              onChange={() =>
+                                setBatchSelectedRowIds(prev =>
+                                  isChecked ? prev.filter(id => id !== row.id) : [...prev, row.id]
+                                )
+                              }
+                            />
+                            <Box sx={{ flexGrow: 1 }}>
+                              <Typography variant="body2" sx={{ fontWeight: 500 }}>
+                                {rowModel?.name || 'Unknown model'}
+                                {row.rowSublabel ? ` · ${row.rowSublabel}` : ''}
+                              </Typography>
+                              <Typography variant="caption" color="text.secondary">
+                                Threshold {row.rowThreshold} · Ø {row.rowDiameter}px
+                                {row.selectedClasses?.length > 0 ? ` · ${row.selectedClasses.join(', ')}` : ''}
+                              </Typography>
+                            </Box>
                           </Box>
-                        </Box>
-                      )
-                    })}
-                  </Box>
-                )}
+                        )
+                      })}
+                    </Box>
+                  )}
 
-                {/* Image Set Picker */}
-                <Typography variant="body2" sx={{ fontWeight: 600, mb: 1 }}>
-                  Image Set
-                </Typography>
-                {imageSets.length === 0 ? (
-                  <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-                    No image sets available. Create one from the image sets menu.
+                  {/* Image Set Picker */}
+                  <Typography variant="body2" sx={{ fontWeight: 600, mb: 1 }}>
+                    Image Set
                   </Typography>
-                ) : (
-                  <Box sx={{ mb: 3 }}>
-                    {imageSets.map((set) => {
-                      const isSelected = batchImageSetId === set.id
-                      return (
-                        <Box
-                          key={set.id}
-                          display="flex"
-                          alignItems="center"
-                          sx={{
-                            px: 1.5,
-                            py: 1,
-                            mb: 0.5,
-                            borderRadius: 1,
-                            border: '1px solid',
-                            borderColor: isSelected ? 'primary.main' : 'divider',
-                            bgcolor: isSelected ? 'primary.50' : 'transparent',
-                            cursor: 'pointer',
-                            transition: 'all 0.15s ease',
-                          }}
-                          onClick={() => setBatchImageSetId(set.id)}
-                        >
+                  {imageSets.length === 0 ? (
+                    <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
+                      No image sets available. Create one from the image sets menu.
+                    </Typography>
+                  ) : (
+                    <Box sx={{ mb: 3 }}>
+                      {imageSets.map((set) => {
+                        const isSelected = batchImageSetId === set.id
+                        return (
                           <Box
+                            key={set.id}
+                            display="flex"
+                            alignItems="center"
                             sx={{
-                              width: 16,
-                              height: 16,
-                              borderRadius: '50%',
-                              border: '2px solid',
-                              borderColor: isSelected ? 'primary.main' : 'text.disabled',
-                              bgcolor: isSelected ? 'primary.main' : 'transparent',
-                              mr: 1.5,
-                              flexShrink: 0,
+                              px: 1.5,
+                              py: 1,
+                              mb: 0.5,
+                              borderRadius: 1,
+                              border: '1px solid',
+                              borderColor: isSelected ? 'primary.main' : 'divider',
+                              bgcolor: isSelected ? 'primary.50' : 'transparent',
+                              cursor: 'pointer',
                               transition: 'all 0.15s ease',
                             }}
-                          />
-                          <Box sx={{ flexGrow: 1 }}>
-                            <Typography variant="body2" sx={{ fontWeight: 500 }}>
-                              {set.name}
-                            </Typography>
-                            <Typography variant="caption" color="text.secondary">
-                              {set.image_count} image{set.image_count !== 1 ? 's' : ''}
-                            </Typography>
+                            onClick={() => setBatchImageSetId(set.id)}
+                          >
+                            <Box
+                              sx={{
+                                width: 16,
+                                height: 16,
+                                borderRadius: '50%',
+                                border: '2px solid',
+                                borderColor: isSelected ? 'primary.main' : 'text.disabled',
+                                bgcolor: isSelected ? 'primary.main' : 'transparent',
+                                mr: 1.5,
+                                flexShrink: 0,
+                                transition: 'all 0.15s ease',
+                              }}
+                            />
+                            <Box sx={{ flexGrow: 1 }}>
+                              <Typography variant="body2" sx={{ fontWeight: 500 }}>
+                                {set.name}
+                              </Typography>
+                              <Typography variant="caption" color="text.secondary">
+                                {set.image_count} image{set.image_count !== 1 ? 's' : ''}
+                              </Typography>
+                            </Box>
                           </Box>
-                        </Box>
-                      )
-                    })}
+                        )
+                      })}
+                    </Box>
+                  )}
+
+                  <Divider sx={{ mb: 2 }} />
+
+                  {/* Footer */}
+                  <Box display="flex" justifyContent="flex-end" gap={1.5}>
+                    <Button variant="outlined" onClick={() => setBatchDetectModalOpen(false)}>
+                      Cancel
+                    </Button>
+                    <Button
+                      variant="contained"
+                      disabled={!batchImageSetId || batchSelectedRowIds.length === 0}
+                      onClick={handleBatchDetect}
+                    >
+                      Run Batch ({batchSelectedRowIds.length} row{batchSelectedRowIds.length !== 1 ? 's' : ''})
+                    </Button>
                   </Box>
-                )}
-
-                <Divider sx={{ mb: 2 }} />
-
-                {/* Footer */}
-                <Box display="flex" justifyContent="flex-end" gap={1.5}>
-                  <Button variant="outlined" onClick={() => setBatchDetectModalOpen(false)}>
-                    Cancel
-                  </Button>
-                  <Button
-                    variant="contained"
-                    disabled={!batchImageSetId || batchSelectedRowIds.length === 0}
-                    onClick={handleBatchDetect}
-                  >
-                    Run Batch ({batchSelectedRowIds.length} row{batchSelectedRowIds.length !== 1 ? 's' : ''})
-                  </Button>
                 </Box>
-              </Box>
-            </Modal>
+              </Modal>
+            </Box>
           </Box>
-          
-          <TabMenu items={tabs}></TabMenu>
         </SideMenu>
 
         <Box sx={{ flexGrow: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
@@ -3056,9 +2742,6 @@ export default function CellAnnotationTool() {
         {calibratorOpen && (
           <CellCalibrator scale={scale} onClose={() => setCalibratorOpen(false)} />
         )}
-        <SideMenu anchorSide={'right'}>
-          <TabMenu items={dataTabs}></TabMenu>
-        </SideMenu>
       </Box>
     </Box>
   )
