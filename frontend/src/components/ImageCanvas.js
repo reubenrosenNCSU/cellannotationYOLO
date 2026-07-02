@@ -6,7 +6,7 @@ const LARGE_IMAGE_THRESHOLD = 16000
 const MAX_VISIBLE_TILES = 36
 
 export default function ImageCanvas({ src, boxes, onAddBox, onRemoveBox, isCropping,
-    onCrop, currentClass, classes, imageSize, brightness, contrast, scale, onScaleChange, showLabels = true }) {
+    onCrop, currentClass, classes, imageSize, brightness, contrast, scale, onScaleChange, showLabels = true, currentSet }) {
   const canvasRef = useRef(null)
   const imgRef = useRef(null)
   const tilesRef = useRef({})
@@ -173,31 +173,51 @@ export default function ImageCanvas({ src, boxes, onAddBox, onRemoveBox, isCropp
 
     const fontSize = 11 / scale
     ctx.font = `${fontSize}px sans-serif`
+    boxes.forEach((box) => {
+      const style = box.renderStyle || 'solid'
 
-    boxes.forEach((b) => {
-      const color = classes[b.class].color
+      if (style === 'invisible') {
+        return
+      }
+      // Configure canvas dash line definitions
+      if (style === 'dashed') {
+        // Line length of 6 pixels, gap of 4 pixels (scaled dynamically)
+        ctx.setLineDash([6 / scale, 4 / scale])
+      } else if (style === 'dotted') {
+        // Line length of 2 pixels, gap of 2 pixels (scaled dynamically)
+        ctx.setLineDash([2 / scale, 2 / scale])
+      } else {
+        // 'solid' style resets configuration back to a default unbroken line
+        ctx.setLineDash([])
+      }
+
+      const color = box.color
       ctx.strokeStyle = color
-      ctx.strokeRect(b.x, b.y, b.w, b.h)
+      ctx.strokeRect(box.x, box.y, box.w, box.h)
+
+      ctx.setLineDash([])
 
       if (showLabels) {
-        const label = b.confidence != null
-          ? `${classes[b.class].name} ${(b.confidence * 100).toFixed(0)}%${b.label ? ` - ${b.label}` : ''}`
-          : classes[b.class].name
+        const label = box.confidence != null
+          ? `${box.name} ${(box.confidence * 100).toFixed(0)}%${box.sublabel ? ` - ${box.sublabel}` : ''}`
+          : `${box.name}${box.sublabel ? ` - ${box.sublabel}` : ''}`
         const padding = 2 / scale
         const textWidth = ctx.measureText(label).width
         const labelH = fontSize + padding * 2
-        const labelY = b.y - labelH > 0 ? b.y - labelH : b.y
+        const labelY = box.y - labelH > 0 ? box.y - labelH : box.y
 
         ctx.fillStyle = color
-        ctx.fillRect(b.x, labelY, textWidth + padding * 2, labelH)
+        ctx.fillRect(box.x, labelY, textWidth + padding * 2, labelH)
         ctx.fillStyle = getLabelTextColor(color)
-        ctx.fillText(label, b.x + padding, labelY + fontSize)
+        ctx.fillText(label, box.x + padding, labelY + fontSize)
       }
     })
 
+    ctx.setLineDash([])
+    
     // draw box while dragging
     if (currentBox) {
-      ctx.strokeStyle = classes[currentClass].color
+      ctx.strokeStyle = classes[currentSet][currentClass].color
       ctx.strokeRect(currentBox.x, currentBox.y, currentBox.w, currentBox.h)
     }
 
@@ -320,6 +340,7 @@ export default function ImageCanvas({ src, boxes, onAddBox, onRemoveBox, isCropp
         setCurrentBox(null)
         return
       }
+      currentBox.isDetected = false
       onAddBox(currentBox)
       setCurrentBox(null)
     }

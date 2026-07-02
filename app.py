@@ -1255,7 +1255,7 @@ def detect_finetuned():
         print(error_details)
         return jsonify({'error': str(e), 'traceback': error_details}), 500
 
-import json
+
 @app.route('/batch-detect', methods=['POST'])
 def batch_detect():
     user_id = session.get('user_id')
@@ -1266,8 +1266,10 @@ def batch_detect():
     final_dir = os.path.join('users', user_id, 'finaloutput')
 
     try:
+        # 1) Save uploaded files into a temp per-user directory
         batch_dir = os.path.join('users', user_id, 'batch_temp')
         os.makedirs(batch_dir, exist_ok=True)
+        # clear existing files
         clear_folder(batch_dir)
 
         uploaded_files = request.files.getlist('images')
@@ -1280,19 +1282,10 @@ def batch_detect():
                 continue
             f.save(os.path.join(batch_dir, fname))
 
+        # 2) Read form params
         detection_type = request.form.get('detection_type', 'SGN')
-
-        # Parse the list of {threshold, cell_diameter} settings
-        settings_json = request.form.get('detection_settings')
-        if settings_json:
-            detection_settings = json.loads(settings_json)
-        else:
-            # Fallback to legacy single threshold/cell_diameter fields
-            detection_settings = [{
-                'threshold': float(request.form.get('threshold', 0.5)),
-                'cell_diameter': float(request.form.get('cell_diameter', 34))
-            }]
-
+        threshold = float(request.form.get('threshold', 0.5))
+        cell_diameter = float(request.form.get('cell_diameter', 34))
         custom_model_file = request.files.get('custom_model')
 
         model_path = None
@@ -1301,6 +1294,7 @@ def batch_detect():
             custom_model_file.save(cp)
             model_path = cp
 
+        # 3) Process images one-by-one and collect results
         results = []
         model_map = {
             'SGN': 'snapshots/SGN_best.pt',
@@ -1318,79 +1312,86 @@ def batch_detect():
             if not fname.lower().endswith(('.tif', '.tiff', '.png', '.jpg', '.jpeg')):
                 continue
 
-            base_name = os.path.splitext(fname)[0]
+            try:
+                # 1. Preprocess: handles 16-bit to 8-bit normalization and physical scaling
+                prep_data = preprocess_image(input_path, upload_dir, detection_type, cell_diameter)
+                
+                # 2. SAHI Detection: replaces the split/detect/merge subprocesses
+                final_annotation = detect_to_yolo(
+                    image_path=prep_data['path'],
+                    model_path=active_model,
+                    image_width=prep_data['det_w'],
+                    image_height=prep_data['det_h'],
+                    threshold=threshold
+                )
 
-            # Run detection once per setting for this image
-            for setting in detection_settings:
-                threshold = float(setting.get('threshold', 0.5))
-                cell_diameter = float(setting.get('cell_diameter', 34))
+                # 3. Create the final "Safe" TIFF (Scaled but NOT normalized)
+                base_name = os.path.splitext(fname)[0]
+                out_uuid = uuid.uuid4().hex[:8]
+                out_base = f"{base_name}_scaled_{int(cell_diameter)}_{out_uuid}"
+                
+                final_img_path = os.path.join(final_dir, out_base + ".png")
+                final_txt_path = os.path.join(final_dir, out_base + ".txt")
 
-                try:
-                    prep_data = preprocess_image(input_path, upload_dir, detection_type, cell_diameter)
+                import shutil
+                if os.path.exists(prep_data['path']):
+                    shutil.move(prep_data['path'], final_img_path)
 
-                    final_annotation = detect_to_yolo(
-                        image_path=prep_data['path'],
-                        model_path=active_model,
-                        image_width=prep_data['det_w'],
-                        image_height=prep_data['det_h'],
-                        threshold=threshold
-                    )
+                with open(final_txt_path, 'w') as f:
+                    f.write(final_annotation)
 
-                    out_uuid = uuid.uuid4().hex[:8]
-                    out_base = f"{base_name}_t{threshold}_d{int(cell_diameter)}_{out_uuid}"
+                # Clean up the temporary normalized detection PNG
+                if os.path.exists(prep_data['path']):
+                    os.remove(prep_data['path'])
 
-                    final_img_path = os.path.join(final_dir, out_base + ".png")
-                    final_txt_path = os.path.join(final_dir, out_base + ".txt")
+                results.append({
+                    'success': True,
+                    'original_filename': fname,
+                    'tiff_path': final_img_path,
+                    'txt_path': final_txt_path,
+                    'det_width': prep_data['det_w'],
+                    'det_height': prep_data['det_h']
+                })
 
-                    import shutil
-                    if os.path.exists(prep_data['path']):
-                        shutil.move(prep_data['path'], final_img_path)
+            except Exception as e:
+                results.append({
+                    'success': False,
+                    'original_filename': fname,
+                    'error': str(e)
+                })
+            # res = batch_process_image_yolo(user_id, input_path, detection_type, threshold, model_path=model_path, cell_diameter=cell_diameter)
+            # # add original filename for diagnostics
+            # res['original_filename'] = fname
+            # results.append(res)
 
-                    with open(final_txt_path, 'w') as f:
-                        f.write(final_annotation)
-
-                    if os.path.exists(prep_data['path']):
-                        os.remove(prep_data['path'])
-
-                    results.append({
-                        'success': True,
-                        'original_filename': fname,
-                        'tiff_path': final_img_path,
-                        'txt_path': final_txt_path,
-                        'threshold': threshold,
-                        'cell_diameter': cell_diameter,
-                        'det_width': prep_data['det_w'],
-                        'det_height': prep_data['det_h']
-                    })
-
-                except Exception as e:
-                    results.append({
-                        'success': False,
-                        'original_filename': fname,
-                        'threshold': threshold,
-                        'cell_diameter': cell_diameter,
-                        'error': str(e)
-                    })
-
+        # 4) Build ZIP with exact pairs: tiff + matching .txt (or an error file for failures)
         zip_buffer = io.BytesIO()
         with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zf:
             for res in results:
                 orig = res.get('original_filename', 'unknown')
-                tag = f"_t{res.get('threshold')}_d{int(res.get('cell_diameter', 0))}"
-
                 if not res.get('success'):
-                    err_name = os.path.splitext(orig)[0] + tag + '_ERROR.txt'
+                    err_name = os.path.splitext(orig)[0] + '_ERROR.txt'
                     zf.writestr(err_name, res.get('error', 'processing error'))
                     continue
 
+                tiff_path = res.get('tiff_path')
                 txt_path = res.get('txt_path')
+
+                # defensive existence checks
+                # if tiff_path and os.path.exists(tiff_path):
+                #     zf.write(tiff_path, os.path.basename(tiff_path))
+                # else:
+                #     # include a small note if the TIFF is missing
+                #     zf.writestr(os.path.splitext(orig)[0] + '_MISSING_TIFF.txt', f"Missing TIFF for {orig}")
+
                 if txt_path and os.path.exists(txt_path):
                     zf.write(txt_path, os.path.basename(txt_path))
                 else:
-                    zf.writestr(os.path.splitext(orig)[0] + tag + '_MISSING_TXT.txt', f"Missing TXT for {orig}")
+                    zf.writestr(os.path.splitext(orig)[0] + '_MISSING_TXT.txt', f"Missing TXT for {orig}")
 
         zip_buffer.seek(0)
 
+        # 5) Cleanup temp upload folder (keep finaloutput intact)
         try:
             shutil.rmtree(batch_dir, ignore_errors=True)
         except Exception:
@@ -1405,6 +1406,7 @@ def batch_detect():
 
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
     
 
 
