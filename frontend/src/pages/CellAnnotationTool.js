@@ -598,6 +598,8 @@ export default function CellAnnotationTool() {
         setDetectionSettings(loadedRows)
         setSelectedRowId(loadedRows[0].id)
         setActiveRowIds(loadedRows.map(row => row.id))
+      } else {
+        setActiveRowIds([])
       }
 
     } catch (e) {

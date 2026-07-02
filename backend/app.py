@@ -1,3 +1,4 @@
+import sys
 from werkzeug.utils import secure_filename  # ADD THIS AT TOP OF FILE
 from flask import Flask, request, jsonify, send_from_directory, send_file, g
 import os
@@ -25,6 +26,7 @@ import tensorflow as tf
 from ultralytics import YOLO
 from scripts.normalization import normalize_image
 from scripts.sahi_detect import detect_to_yolo
+from scripts.stardist_detect import stardist_detect_to_yolo
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))  # Gets directory where app.py is
 os.chdir(BASE_DIR)
 from PIL import Image
@@ -92,6 +94,146 @@ def preprocess_image(image_path, detection_type, cell_diameter):
         "det_h": orig_h,
         "scaling_factor": scaling_factor
     }
+
+import subprocess
+import tempfile
+
+def run_stardist_subprocess(image_path, model_path, image_width, image_height,
+                             nucleus_diam_min=7, nucleus_diam_max=17):
+    """
+    Runs StarDist detection in an isolated subprocess so TensorFlow never
+    shares a process with torch/ultralytics (cuDNN version conflict).
+    """
+    with tempfile.NamedTemporaryFile(mode='r', suffix='.txt', delete=False) as tmp:
+        output_path = tmp.name
+
+    worker_script = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'scripts', 'stardist_worker.py')
+
+    cmd = [
+        sys.executable,  # same python interpreter/env currently running
+        worker_script,
+        '--image_path', image_path,
+        '--model_path', model_path,
+        '--image_width', str(image_width),
+        '--image_height', str(image_height),
+        '--nucleus_diam_min', str(nucleus_diam_min),
+        '--nucleus_diam_max', str(nucleus_diam_max),
+        '--output_path', output_path,
+    ]
+
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+
+    if result.returncode != 0:
+        os.unlink(output_path) if os.path.exists(output_path) else None
+        raise RuntimeError(f"StarDist subprocess failed: {result.stderr}")
+
+    with open(output_path, 'r') as f:
+        yolo_output = f.read()
+    os.unlink(output_path)
+
+    return yolo_output
+
+def execute_detection(image_record, model_record, threshold, cell_diameter, sublabel, selected_classes=None):
+    """
+    Shared pipeline that handles preprocessing, model routing (StarDist vs. SAHI),
+    and coordinate space translation from YOLO to UI-pixels.
+    """
+    # 1. Filter class indices
+    allowed_class_indices = None
+    if selected_classes is not None:
+        allowed_class_indices = set()
+        for idx, label_obj in enumerate(model_record.label_set.labels):
+            if label_obj.get('name') in selected_classes:
+                allowed_class_indices.add(idx)
+
+    model_path = model_record.file_path
+    detection_type = model_record.name
+
+    # 2. Check model type and route execution
+    if "stardist" in detection_type.lower():
+        base_image_path = os.path.join('data', image_record.original_path)
+        abs_image_path = os.path.abspath(base_image_path)
+        abs_model_path = os.path.abspath(model_path)
+        print("Executing StarDist Detect (subprocess)")
+        yolo_output = run_stardist_subprocess(
+            image_path=abs_image_path,
+            model_path=abs_model_path,
+            image_width=image_record.width,
+            image_height=image_record.height,
+            nucleus_diam_min=7,
+            nucleus_diam_max=17,
+        )
+        print(f'[DEBUG] yolo_output repr (first 300 chars): {repr(yolo_output[:300])}')
+    else:
+        # Default SAHI / Standard Object Detection Path
+        base_image_path = os.path.join('data', image_record.normalized_path)
+        prep_data = preprocess_image(
+            image_path=base_image_path,
+            detection_type=detection_type,
+            cell_diameter=cell_diameter,
+        )
+
+        # FIX: Restored exact parameter names matching your old endpoint
+        # Your old route passed image_path=prep_data['image_source']
+        yolo_output = detect_to_yolo(
+            image_path=prep_data['image_source'], 
+            model_path=model_path,
+            image_width=prep_data['det_w'],
+            image_height=prep_data['det_h'],
+            threshold=threshold,
+        )
+
+    # 3. Parse Output Strings & Convert Coordinates back to front-end canvas space
+    yolo_lines = []
+    converted_annotations = []
+    img_w = image_record.width
+    img_h = image_record.height
+
+    # Guard against completely empty or None outputs
+    if not yolo_output:
+        return "", []
+
+    for line in yolo_output.split('\n'):
+        if not line.strip():
+            continue
+        parts = line.strip().split(' ')
+        
+        # Ensure line has enough parameters to prevent unpack crashes
+        if len(parts) < 5:
+            continue
+            
+        cls = int(parts[0])
+        
+        if allowed_class_indices is not None and cls not in allowed_class_indices:
+            continue
+
+        cx = float(parts[1])
+        cy = float(parts[2])
+        w = float(parts[3])
+        h = float(parts[4])
+        conf = float(parts[5]) if len(parts) > 5 else None
+
+        # Build standard YOLO file string format
+        yolo_lines.append(f"{cls} {cx:.6f} {cy:.6f} {w:.6f} {h:.6f}")
+
+        # Map relative ratios back to pixel space bounds for the front-end canvas
+        pixel_w = w * img_w
+        pixel_h = h * img_h
+        pixel_x = (cx * img_w) - (pixel_w / 2)
+        pixel_y = (cy * img_h) - (pixel_h / 2)
+
+        converted_annotations.append({
+            "x": pixel_x,
+            "y": pixel_y,
+            "w": pixel_w,
+            "h": pixel_h,
+            "class": cls,
+            "confidence": conf,
+            "is_detected": True,
+            "sublabel": sublabel
+        })
+
+    return "\n".join(yolo_lines), converted_annotations
 
 def sanitize_box(x1, y1, x2, y2):
     """Ensure x1 <= x2 and y1 <= y2"""
@@ -1018,48 +1160,17 @@ def detect():
     selected_classes = data.get('selected_classes', None)
 
     try:
-        # Fetch records and verify ownership
         image_record = ImageRecord.query.filter_by(id=image_id, user_id=g.user.id).first()
         model_record = Weights.query.filter_by(id=model_id, user_id=g.user.id).first()
 
-        if not image_record:
-            return jsonify({"error": "Image not found or unauthorized"}), 404
-        if not model_record:
-            return jsonify({"error": "Model details not found or unauthorized"}), 404
+        if not image_record or not model_record:
+            return jsonify({"error": "Data records not found or unauthorized"}), 404
 
-        allowed_class_indices = None
-        if selected_classes is not None:
-            allowed_class_indices = set()
-            for idx, label_obj in enumerate(model_record.label_set.labels):
-                if label_obj.get('name') in selected_classes:
-                    allowed_class_indices.add(idx)
-
-        # Use normalized_path if it exists to preserve custom normalization adjustments
-        base_image_path = os.path.join('data', image_record.normalized_path)
-        model_path = model_record.file_path
-        detection_type = model_record.name
-
-        # Handle image preprocessing (scaling / resizing structures)
-        prep_data = preprocess_image(
-            image_path=base_image_path,
-            detection_type=detection_type,
-            cell_diameter=cell_diameter,
+        yolo_string, converted_annotations = execute_detection(
+            image_record, model_record, threshold, cell_diameter, sublabel, selected_classes
         )
 
-        # detect_to_yolo should handle either a file path or a PIL Image object
-        yolo_output = detect_to_yolo(
-            image_path=prep_data['image_source'],
-            model_path=model_path,
-            image_width=prep_data['det_w'],
-            image_height=prep_data['det_h'],
-            threshold=threshold,
-        )
-
-        existing_annotation = Annotation.query.filter_by(
-            id=annotation_id
-        ).first()
-        
-
+        existing_annotation = Annotation.query.filter_by(id=annotation_id).first()
         if existing_annotation:
             full_path = existing_annotation.file_path
             target_record = existing_annotation
@@ -1069,90 +1180,31 @@ def detect():
             full_path = os.path.join('data', annotation_dir, f'{unique_id}.txt')
             
             target_record = Annotation(
-                id=unique_id,
-                user_id=g.user.id,
-                file_path=full_path,
-                image_id=image_id,
-                weights_id=model_id,
-                threshold=threshold,
-                cell_diameter=cell_diameter,
-                sublabel=sublabel
+                id=unique_id, user_id=g.user.id, file_path=full_path, image_id=image_id,
+                weights_id=model_id, threshold=threshold, cell_diameter=cell_diameter, sublabel=sublabel
             )
             db.session.add(target_record)
-            annotation_id=unique_id
+            annotation_id = unique_id
 
-
-        yolo_lines = []
-        converted_annotations = []
-        img_w = image_record.width
-        img_h = image_record.height
-
-        for line in yolo_output.split('\n'):
-            if not line.strip():
-                continue
-            parts = line.strip().split(' ')
-            cls = int(parts[0])
-            
-            if allowed_class_indices is not None and cls not in allowed_class_indices:
-                continue
-
-            cx = float(parts[1])
-            cy = float(parts[2])
-            w = float(parts[3])
-            h = float(parts[4])
-            conf = float(parts[5]) if len(parts) > 5 else None
-
-            # Standard YOLO output structure string
-            yolo_lines.append(f"{cls} {cx:.6f} {cy:.6f} {w:.6f} {h:.6f}")
-
-            # Conversion back into relative canvas pixel bounds
-            pixel_w = w * img_w
-            pixel_h = h * img_h
-            pixel_x = (cx * img_w) - (pixel_w / 2)
-            pixel_y = (cy * img_h) - (pixel_h / 2)
-
-            converted_annotations.append({
-                "x": pixel_x,
-                "y": pixel_y,
-                "w": pixel_w,
-                "h": pixel_h,
-                "class": cls,
-                "confidence": conf,
-                "is_detected": True,
-                "sublabel": sublabel
-            })
-
-        # 6. Save/Override the physical standard YOLO txt file asset
+        # Save the layout flat-file
         os.makedirs(os.path.dirname(full_path), exist_ok=True)
         with open(full_path, 'w') as f:
-            f.write("\n".join(yolo_lines))
+            f.write(yolo_string)
 
-        # 7. Update database record values and flag JSON mutation tracking
         target_record.annotations_detected = converted_annotations
         target_record.count_detected = len(converted_annotations)
-        
         flag_modified(target_record, "annotations_detected")
-        
         db.session.commit()
 
-        annotation_weights = Weights.query.filter_by(
-            id=model_id, 
-            user_id=g.user.id 
-        ).first()
-
-        # Structuring Response Data Payload
         return jsonify({
             "annotations": converted_annotations,
             "annotation_id": annotation_id,
-            "labels": annotation_weights.label_set.to_dict()
+            "labels": model_record.label_set.to_dict()
         })
 
     except Exception as e:
         db.session.rollback()
-        import traceback
-        error_details = traceback.format_exc()
-        print(f"Detection runtime exception: {error_details}")
-        return jsonify({'error': str(e), 'traceback': error_details}), 500
+        return jsonify({'error': str(e)}), 500
 
 
 @app.route('/batch-detect', methods=['POST'])
@@ -1172,155 +1224,75 @@ def batch_detect():
     selected_classes = data.get('selected_classes', None)
 
     try:
-        # Fetch the image set and verify ownership
         image_set = ImageSet.query.filter_by(id=image_set_id, user_id=g.user.id).first()
-        if not image_set:
-            return jsonify({"error": "Image set not found or unauthorized"}), 404
-
         model_record = Weights.query.filter_by(id=model_id, user_id=g.user.id).first()
-        if not model_record:
-            return jsonify({"error": "Model not found or unauthorized"}), 404
 
-        allowed_class_indices = None
-        if selected_classes is not None:
-            allowed_class_indices = set()
-            for idx, label_obj in enumerate(model_record.label_set.labels):
-                if label_obj.get('name') in selected_classes:
-                    allowed_class_indices.add(idx)
+        if not image_set or not model_record:
+            return jsonify({"error": "Records not found or unauthorized"}), 404
 
-        model_path = model_record.file_path
-        detection_type = model_record.name
         annotation_dir = g.user.get_path('annotations')
         os.makedirs(os.path.join('data', annotation_dir), exist_ok=True)
-
         results = []
 
         for image_record in image_set.images:
             try:
-                base_image_path = os.path.join('data', image_record.normalized_path)
-
-                prep_data = preprocess_image(
-                    image_path=base_image_path,
-                    detection_type=detection_type,
-                    cell_diameter=cell_diameter,
-                )
-
-                yolo_output = detect_to_yolo(
-                    image_path=prep_data['image_source'],
-                    model_path=model_path,
-                    image_width=prep_data['det_w'],
-                    image_height=prep_data['det_h'],
-                    threshold=threshold,
+                yolo_string, converted_annotations = execute_detection(
+                    image_record, model_record, threshold, cell_diameter, sublabel, selected_classes
                 )
 
                 existing_annotation = Annotation.query.filter_by(
-                    image_id=image_record.id,
-                    weights_id=model_id, 
-                    user_id=g.user.id,
-                    threshold=threshold,
-                    cell_diameter=cell_diameter,
-                    sublabel=sublabel
+                    image_id=image_record.id, weights_id=model_id, user_id=g.user.id,
+                    threshold=threshold, cell_diameter=cell_diameter, sublabel=sublabel
                 ).first()
 
                 if existing_annotation:
                     full_path = existing_annotation.file_path
                     target_record = existing_annotation
+                    current_annotation_id = target_record.id
                 else:
                     unique_id = str(uuid.uuid4())
                     full_path = os.path.join('data', annotation_dir, f'{unique_id}.txt')
                     target_record = Annotation(
-                        id=unique_id,
-                        user_id=g.user.id,
-                        file_path=full_path,
-                        image_id=image_record.id,
-                        weights_id=model_id,
-                        threshold=threshold,
-                        cell_diameter=cell_diameter,
-                        sublabel=sublabel
+                        id=unique_id, user_id=g.user.id, file_path=full_path, image_id=image_record.id,
+                        weights_id=model_id, threshold=threshold, cell_diameter=cell_diameter, sublabel=sublabel
                     )
                     db.session.add(target_record)
-                    annotation_id = unique_id
-
-                yolo_lines = []
-                converted_annotations = []
-                img_w = image_record.width
-                img_h = image_record.height
-
-                for line in yolo_output.split('\n'):
-                    if not line.strip():
-                        continue
-                    parts = line.strip().split(' ')
-                    cls = int(parts[0])
-
-                    if allowed_class_indices is not None and cls not in allowed_class_indices:
-                        continue
-
-                    cx = float(parts[1])
-                    cy = float(parts[2])
-                    w = float(parts[3])
-                    h = float(parts[4])
-                    conf = float(parts[5]) if len(parts) > 5 else None
-
-                    yolo_lines.append(f"{cls} {cx:.6f} {cy:.6f} {w:.6f} {h:.6f}")
-
-                    pixel_w = w * img_w
-                    pixel_h = h * img_h
-                    pixel_x = (cx * img_w) - (pixel_w / 2)
-                    pixel_y = (cy * img_h) - (pixel_h / 2)
-
-                    converted_annotations.append({
-                        "x": pixel_x,
-                        "y": pixel_y,
-                        "w": pixel_w,
-                        "h": pixel_h,
-                        "class": cls,
-                        "confidence": conf,
-                        "is_detected": True,
-                        "sublabel": sublabel
-                    })
+                    current_annotation_id = unique_id
 
                 with open(full_path, 'w') as f:
-                    f.write("\n".join(yolo_lines))
+                    f.write(yolo_string)
 
                 target_record.annotations_detected = converted_annotations
                 target_record.count_detected = len(converted_annotations)
                 flag_modified(target_record, "annotations_detected")
-
                 db.session.commit()
 
                 results.append({
                     "image_id": image_record.id,
-                    "annotation_id": annotation_id,
+                    "annotation_id": current_annotation_id,
                     "count_detected": len(converted_annotations),
                     "success": True
                 })
 
             except Exception as e:
                 db.session.rollback()
-                import traceback
-                print(f"Error processing image {image_record.id}: {traceback.format_exc()}")
                 results.append({
                     "image_id": image_record.id,
                     "success": False,
                     "error": str(e)
                 })
 
-        total = len(results)
-        succeeded = sum(1 for r in results if r["success"])
-
         return jsonify({
             "status": "complete",
             "image_set_id": image_set_id,
-            "total": total,
-            "succeeded": succeeded,
-            "failed": total - succeeded,
+            "total": len(results),
+            "succeeded": sum(1 for r in results if r["success"]),
+            "failed": sum(1 for r in results if not r["success"]),
             "results": results
         })
 
     except Exception as e:
         db.session.rollback()
-        import traceback
-        print(f"Batch detect exception: {traceback.format_exc()}")
         return jsonify({"error": str(e)}), 500
 
 

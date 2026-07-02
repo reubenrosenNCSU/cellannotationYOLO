@@ -44,7 +44,16 @@ class User(db.Model):
             {
                 'weights_name': 'SGN',
                 'filepath': 'snapshots/SGN_best.pt',
-                'labels': [{'name': 'SGN', 'color': '#CA00BC'}]
+                'labels': [
+                    {'name': 'SGN', 'color': '#CA00BC'}
+                ]
+            },
+            {
+                'weights_name': 'StarDist',
+                'filepath': 'snapshots/StarDist',
+                'labels': [
+                    {'name': 'Nucleus', 'color': '#41BF37'}
+                ]
             }
         ]
 

@@ -8,13 +8,16 @@ from csbdeep.utils import normalize
 _model_cache: dict = {}
 
 def get_model(model_path: str) -> StarDist2D:
-    """
-    Returns a cached StarDist2D model for the given path.
-    """
     if model_path not in _model_cache:
         basedir = os.path.dirname(model_path)
         name = os.path.basename(model_path)
-        _model_cache[model_path] = StarDist2D(None, name=name, basedir=basedir)
+        model = StarDist2D(None, name=name, basedir=basedir)
+
+        # Warmup
+        dummy = np.zeros((256, 256), dtype=np.float32)
+        model.predict_instances(dummy, n_tiles=(1, 1))
+
+        _model_cache[model_path] = model
     return _model_cache[model_path]
 
 
@@ -31,13 +34,16 @@ def run_detection(
     Runs StarDist prediction and returns a list of regionprops objects.
     """
     if isinstance(image_source, Image.Image):
-        sd_img = np.array(image_source)
+        img = image_source.convert('L') if image_source.mode != 'L' else image_source
+        sd_img = np.array(img)
     else:
-        sd_img = np.array(Image.open(image_source))
+        img = Image.open(image_source).convert('L')
+        sd_img = np.array(img)
 
     sd_img = normalize(sd_img, norm_low, norm_high)
 
     model = get_model(model_path)
+    print(f'[DEBUG] sd_img shape: {sd_img.shape}, dtype: {sd_img.dtype}, n_tiles: {n_tiles}')
     labels, details = model.predict_instances(
         sd_img,
         axes='YX',
@@ -45,6 +51,7 @@ def run_detection(
         prob_thresh=prob_thresh,
         nms_thresh=nms_thresh,
     )
+    print(f'[DEBUG] predict_instances returned: {labels.max()} instances, details keys={list(details.keys())}')
     return labels
 
 
@@ -79,7 +86,7 @@ def predictions_to_yolo(labels, image_width: int, image_height: int) -> str:
     return "\n".join(lines)
 
 
-def detect_to_yolo(
+def stardist_detect_to_yolo(
     image_source,
     model_path: str,
     image_width: int,
@@ -97,5 +104,9 @@ def detect_to_yolo(
     Drop-in equivalent of sahi_detect.detect_to_yolo().
     """
     labels = run_detection(image_source, model_path, prob_thresh, nms_thresh, n_tiles, norm_low, norm_high)
+    print(f'[DEBUG] raw labels: {labels.max()} instances')
     filtered = filter_labels(labels, nucleus_diam_min, nucleus_diam_max)
-    return predictions_to_yolo(filtered, image_width, image_height)
+    print(f'[DEBUG] filtered labels: {filtered.max()} instances (min_diam={nucleus_diam_min}, max_diam={nucleus_diam_max})')
+    result = predictions_to_yolo(filtered, image_width, image_height)
+    print(f'[DEBUG] yolo_output lines: {len(result.splitlines()) if result else 0}')
+    return result
