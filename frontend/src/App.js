@@ -2,6 +2,7 @@ import { Box } from '@mui/material'
 import { createTheme, ThemeProvider } from '@mui/material/styles'
 import CssBaseline from '@mui/material/CssBaseline'
 import CellAnnotationTool from './pages/CellAnnotationTool'
+import ErrorBoundary from './components/ErrorBoundary'
 
 const theme = createTheme({
   palette: {
@@ -120,9 +121,9 @@ function App() {
   return (
     <ThemeProvider theme={theme}>
       <CssBaseline />
-      <Box>
+      <ErrorBoundary>
         <CellAnnotationTool />
-      </Box>
+      </ErrorBoundary>
     </ThemeProvider>
   )
 }
