@@ -225,7 +225,7 @@ export default function CellAnnotationTool() {
           rowDiameter: 34
         }
       ])
-      setActiveRowIds(tempId)
+      setActiveRowIds([tempId])
     })
   }
 
